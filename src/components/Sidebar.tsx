@@ -506,6 +506,16 @@ export default function Sidebar({ appState, setAppState, onToggleRecording, onAd
                     <section>
                       <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-4 px-1">Configurações de Exibição</h3>
                       <div className="space-y-4">
+                        <div className="bg-blue-600/10 border border-blue-500/20 p-4 rounded-2xl flex items-center gap-3">
+                          <div className="bg-blue-500 p-2 rounded-xl">
+                            <Activity className="w-4 h-4 text-white" />
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-bold text-white uppercase">Modo Offline Ativo</p>
+                            <p className="text-[8px] text-blue-400/80 uppercase tracking-wider">Mapas visualizados são salvos para uso sem sinal</p>
+                          </div>
+                        </div>
+
                         <div className="space-y-2">
                            <label className="text-[10px] font-bold text-zinc-400 uppercase ml-1">Formato de Coordenada</label>
                            <div className="grid grid-cols-2 gap-2">
