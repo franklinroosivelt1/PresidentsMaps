@@ -1,0 +1,10 @@
+{
+  "name": "PresidentMaps",
+  "description": "Navegador de mapas profissional com suporte a satélite, gravação de rotas, marcação de pontos e exportação KML.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
