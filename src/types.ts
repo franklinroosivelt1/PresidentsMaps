@@ -34,7 +34,8 @@ export interface ImportedMap {
   id: string;
   name: string;
   url: string; 
-  bounds: [[number, number], [number, number]]; // [sw, ne]
+  bounds: [[number, number], [number, number]]; // [sw, ne] fallback
+  coordinates?: [[number, number], [number, number], [number, number], [number, number]]; // [tl, tr, br, bl]
   visible: boolean;
 }
 

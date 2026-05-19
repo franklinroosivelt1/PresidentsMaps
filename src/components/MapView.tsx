@@ -183,15 +183,16 @@ const MapView = ({
         if (!map.current?.getSource(`map-${m.id}`) && m.visible) {
           const sw = m.bounds[0];
           const ne = m.bounds[1];
+          const coords = m.coordinates || [
+            [sw[1], ne[0]], // tl
+            [ne[1], ne[0]], // tr
+            [ne[1], sw[0]], // br
+            [sw[1], sw[0]]  // bl
+          ];
           map.current?.addSource(`map-${m.id}`, {
             type: 'image',
             url: m.url,
-            coordinates: [
-              [sw[1], ne[0]], // tl
-              [ne[1], ne[0]], // tr
-              [ne[1], sw[0]], // br
-              [sw[1], sw[0]]  // bl
-            ]
+            coordinates: coords
           });
           map.current?.addLayer({
             id: `map-layer-${m.id}`,
@@ -304,15 +305,16 @@ const MapView = ({
         if (!map.current?.getSource(sourceId)) {
           const sw = m.bounds[0];
           const ne = m.bounds[1];
+          const coords = m.coordinates || [
+            [sw[1], ne[0]], // tl
+            [ne[1], ne[0]], // tr
+            [ne[1], sw[0]], // br
+            [sw[1], sw[0]]  // bl
+          ];
           map.current?.addSource(sourceId, {
             type: 'image',
             url: m.url,
-            coordinates: [
-              [sw[1], ne[0]], // tl
-              [ne[1], ne[0]], // tr
-              [ne[1], sw[0]], // br
-              [sw[1], sw[0]]  // bl
-            ]
+            coordinates: coords
           });
           map.current?.addLayer({
             id: layerId,
