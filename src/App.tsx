@@ -38,7 +38,8 @@ export default function App() {
     return INITIAL_STATE;
   });
 
-  const [center, setCenter] = useState({ lat: -23.5505, lng: -46.6333 });
+  const [displayCenter, setDisplayCenter] = useState({ lat: -23.5505, lng: -46.6333 });
+  const [navigationTarget, setNavigationTarget] = useState<{ lat: number, lng: number, timestamp: number } | null>(null);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -61,7 +62,7 @@ export default function App() {
         setUserLocation(loc);
         
         if (!hasInitialLocation) {
-          setCenter(loc);
+          setNavigationTarget({ ...loc, timestamp: Date.now() });
           setHasInitialLocation(true);
         }
         
@@ -80,7 +81,7 @@ export default function App() {
       { enableHighAccuracy: true }
     );
     return () => navigator.geolocation.clearWatch(id);
-  }, [appState.isRecording]);
+  }, [appState.isRecording, hasInitialLocation]);
 
   const toggleRecording = useCallback(() => {
     if (appState.isRecording) {
@@ -120,9 +121,7 @@ export default function App() {
       const data = await res.json();
       if (data && data[0]) {
         const { lat, lon } = data[0];
-        setCenter({ lat: parseFloat(lat), lng: parseFloat(lon) });
-        // We need a way to tell MapView to fly to this location
-        // For now, updating center state will be tracked by MapView via props if we adjust it
+        setNavigationTarget({ lat: parseFloat(lat), lng: parseFloat(lon), timestamp: Date.now() });
       }
     } catch (err) {
       console.error("Erro na busca:", err);
@@ -130,8 +129,7 @@ export default function App() {
   };
 
   const handleMapClick = (lat: number, lng: number) => {
-    // Just update the center state when user taps map
-    setCenter({ lat, lng });
+    // No-op for now unless we want to do something specific
   };
 
   const openAddPOIDialog = (lat: number, lng: number) => {
@@ -169,11 +167,11 @@ export default function App() {
     <div className="relative w-full h-[100dvh] bg-zinc-950 overflow-hidden">
       <MapView 
         userLocation={userLocation}
-        targetCenter={center}
+        targetCenter={navigationTarget}
         pois={appState.pois} 
         activeLayer={appState.activeLayer}
         currentRoute={appState.currentRoute}
-        onCenterChange={(lat, lng) => setCenter({ lat, lng })}
+        onCenterChange={(lat, lng) => setDisplayCenter({ lat, lng })}
         onMapClick={handleMapClick}
         onAddPOI={savePOI}
         measurementMode={appState.measurementMode}
@@ -185,11 +183,11 @@ export default function App() {
         appState={appState} 
         setAppState={setAppState} 
         onToggleRecording={toggleRecording}
-        onAddPoint={() => openAddPOIDialog(center.lat, center.lng)}
-        onGoToPOI={(poi) => setCenter({ lat: poi.lat, lng: poi.lng })}
+        onAddPoint={() => openAddPOIDialog(displayCenter.lat, displayCenter.lng)}
+        onGoToPOI={(poi) => setNavigationTarget({ lat: poi.lat, lng: poi.lng, timestamp: Date.now() })}
         onGoToRoute={(route) => {
           if (route.points.length > 0) {
-            setCenter({ lat: route.points[0].lat, lng: route.points[0].lng });
+            setNavigationTarget({ lat: route.points[0].lat, lng: route.points[0].lng, timestamp: Date.now() });
           }
         }}
         onEditPOI={(poi) => {
@@ -215,7 +213,7 @@ export default function App() {
         <button
           onClick={() => {
             if (userLocation) {
-              setCenter(userLocation);
+              setNavigationTarget({ ...userLocation, timestamp: Date.now() });
             } else {
               alert('Aguardando sinal de GPS...');
             }
@@ -232,11 +230,11 @@ export default function App() {
         </button>
       </div>
       
-      <CoordinatePanel lat={center.lat} lng={center.lng} format={appState.coordinateFormat} />
+      <CoordinatePanel lat={displayCenter.lat} lng={displayCenter.lng} format={appState.coordinateFormat} />
 
       {/* Print Legends - Only visible during print */}
       <div className="hidden print:flex fixed bottom-4 left-4 right-4 justify-between text-[10px] text-black font-mono bg-white/80 p-2 border border-black z-[100]">
-        <div>LE: {center.lat.toFixed(6)}, {center.lng.toFixed(6)} (CENTRO)</div>
+        <div>LE: {displayCenter.lat.toFixed(6)}, {displayCenter.lng.toFixed(6)} (CENTRO)</div>
         <div>PresidentMaps - Localização Profissional</div>
       </div>
       

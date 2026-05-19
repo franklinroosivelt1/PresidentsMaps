@@ -10,7 +10,7 @@ interface MapViewProps {
   pois: POI[];
   activeLayer: MapLayer;
   currentRoute: RoutePoint[];
-  targetCenter?: { lat: number, lng: number };
+  targetCenter?: { lat: number, lng: number, timestamp: number } | null;
   onCenterChange: (lat: number, lng: number) => void;
   onMapClick: (lat: number, lng: number) => void;
   onAddPOI: (poi: POI) => void;
@@ -97,19 +97,13 @@ const MapView = ({
 
   useEffect(() => {
     if (map.current && targetCenter) {
-      const currentCenter = map.current.getCenter();
-      const dist = turf.distance(
-        [currentCenter.lng, currentCenter.lat],
-        [targetCenter.lng, targetCenter.lat],
-        { units: 'meters' }
-      );
-      
-      // Only flyTo if the change is more than 5 meters (likely a click/teleport, not slow pan/drift)
-      if (dist > 5) {
-        map.current.flyTo({ center: [targetCenter.lng, targetCenter.lat], zoom: 15 });
-      }
+      map.current.flyTo({ 
+        center: [targetCenter.lng, targetCenter.lat], 
+        zoom: 15,
+        essential: true 
+      });
     }
-  }, [targetCenter]);
+  }, [targetCenter?.timestamp]);
 
   useEffect(() => {
     if (!map.current || !userLocation) {
