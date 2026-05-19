@@ -206,9 +206,9 @@ export default function Sidebar({ appState, setAppState, onToggleRecording, onAd
         }));
         onGoToMap(newMap);
         alert(`Mapa "${file.name}" importado com sucesso!`);
-      } catch (err) {
-        console.error(err);
-        alert('Erro ao importar PDF. Verifique o arquivo.');
+      } catch (err: any) {
+        console.error("Falha ao importar mapa:", err);
+        alert(`Erro ao importar PDF: ${err.message || 'Verifique o arquivo ou tente outro.'}`);
       }
     }
   };
