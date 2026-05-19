@@ -6,7 +6,7 @@ import POIDialog from './components/POIDialog';
 import { AppState, POI, RoutePoint, SavedRoute } from './types';
 import * as turf from '@turf/turf';
 import { cn } from './lib/utils';
-import { Activity } from 'lucide-react';
+import { Activity, Navigation } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 const STORAGE_KEY = 'president_maps_v1';
@@ -45,6 +45,8 @@ export default function App() {
   const [pendingPOI, setPendingPOI] = useState<{ lat: number; lng: number } | null>(null);
   const [editingPOI, setEditingPOI] = useState<POI | null>(null);
 
+  const [hasInitialLocation, setHasInitialLocation] = useState(false);
+
   // Persistence
   useEffect(() => {
     const { isRecording, currentRoute, measurementMode, measurementPoints, ...rest } = appState;
@@ -57,6 +59,11 @@ export default function App() {
       (pos) => {
         const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
         setUserLocation(loc);
+        
+        if (!hasInitialLocation) {
+          setCenter(loc);
+          setHasInitialLocation(true);
+        }
         
         if (appState.isRecording) {
           const newPoint: RoutePoint = {
@@ -123,6 +130,11 @@ export default function App() {
   };
 
   const handleMapClick = (lat: number, lng: number) => {
+    // Just update the center state when user taps map
+    setCenter({ lat, lng });
+  };
+
+  const openAddPOIDialog = (lat: number, lng: number) => {
     setPendingPOI({ lat, lng });
     setIsDialogOpen(true);
   };
@@ -154,7 +166,7 @@ export default function App() {
   };
 
   return (
-    <div className="relative w-full h-screen bg-zinc-950 overflow-hidden">
+    <div className="relative w-full h-[100dvh] bg-zinc-950 overflow-hidden">
       <MapView 
         userLocation={userLocation}
         targetCenter={center}
@@ -173,7 +185,7 @@ export default function App() {
         appState={appState} 
         setAppState={setAppState} 
         onToggleRecording={toggleRecording}
-        onAddPoint={() => handleMapClick(center.lat, center.lng)}
+        onAddPoint={() => openAddPOIDialog(center.lat, center.lng)}
         onGoToPOI={(poi) => setCenter({ lat: poi.lat, lng: poi.lng })}
         onGoToRoute={(route) => {
           if (route.points.length > 0) {
@@ -198,6 +210,25 @@ export default function App() {
           title={appState.isRecording ? "Parar Gravação" : "Iniciar Gravação"}
         >
           <Activity className="w-6 h-6" />
+        </button>
+
+        <button
+          onClick={() => {
+            if (userLocation) {
+              setCenter(userLocation);
+            } else {
+              alert('Aguardando sinal de GPS...');
+            }
+          }}
+          className={cn(
+            "p-3 border shadow-2xl transition-all active:scale-95 rounded-xl",
+            userLocation 
+              ? "bg-zinc-900 border-zinc-800 text-blue-400 hover:text-white" 
+              : "bg-zinc-900/50 border-zinc-800/50 text-zinc-600 cursor-not-allowed"
+          )}
+          title="Minha Localização"
+        >
+          <Navigation className="w-6 h-6" />
         </button>
       </div>
       
@@ -235,7 +266,7 @@ export default function App() {
                 className="bg-red-600/95 text-white px-5 py-3 rounded-2xl shadow-2xl pointer-events-auto flex flex-col items-center min-w-[160px] border border-red-500/50"
               >
                 <span className="text-[9px] font-bold uppercase tracking-[0.2em] opacity-80 mb-1">
-                  Medição: {appState.measurementMode === 'area' ? 'ÁREA' : 'DISTÂNCIA'}
+                  Medições: {appState.measurementMode === 'area' ? 'ÁREA' : 'DISTÂNCIA'}
                 </span>
                 <div className="font-mono text-lg font-bold">
                   {appState.measurementPoints.length > 2 && appState.measurementMode === 'area' ? (

@@ -67,9 +67,11 @@ export default function CoordinatePanel({ lat, lng, format = 'DMS' }: Coordinate
           )}
         </AnimatePresence>
 
-        <span className="text-[7px] uppercase font-bold tracking-[0.2em] text-zinc-500 border-r border-zinc-800 pr-2">{format}</span>
-        <div className="flex items-center gap-1.5 font-mono text-[11px] font-bold text-white tabular-nums tracking-tight whitespace-nowrap">
-          {getDisplayCoords()}
+        <div className="flex items-center gap-2 whitespace-nowrap leading-none">
+          <span className="text-[6px] uppercase font-bold tracking-[0.1em] text-zinc-500 font-sans border-r border-zinc-800 pr-2">{format}</span>
+          <span className="font-mono text-[9px] font-bold text-white tabular-nums tracking-tight">
+            {getDisplayCoords()}
+          </span>
         </div>
       </button>
     </motion.div>

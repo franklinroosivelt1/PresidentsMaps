@@ -435,16 +435,19 @@ export default function Sidebar({ appState, setAppState, onToggleRecording, onAd
                         </button>
                       </div>
 
-                      <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-3 px-1">Medição de Distância</h3>
+                      <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-3 px-1">Medições</h3>
                       <div className="grid grid-cols-2 gap-2">
                         {[
-                          { id: 'off', label: 'Desativado', icon: X },
                           { id: 'straight', label: 'Distância', icon: Ruler },
                           { id: 'area', label: 'Área (ha)', icon: Share2 },
                         ].map((mode) => (
                           <button
                             key={mode.id}
-                            onClick={() => setAppState(prev => ({ ...prev, measurementMode: mode.id as any, measurementPoints: [] }))}
+                            onClick={() => setAppState(prev => ({ 
+                              ...prev, 
+                              measurementMode: prev.measurementMode === mode.id ? 'off' : mode.id as any, 
+                              measurementPoints: [] 
+                            }))}
                             className={cn(
                               "p-3 rounded-xl border flex flex-col items-center gap-2 transition-all",
                               appState.measurementMode === mode.id 

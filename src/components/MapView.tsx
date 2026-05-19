@@ -19,30 +19,46 @@ interface MapViewProps {
   onAddMeasurementPoint: (lat: number, lng: number) => void;
 }
 
-const LAYER_CONFIGS: Record<MapLayer, string | any> = {
+const LAYER_CONFIGS: Record<MapLayer, any> = {
   'google-satellite': {
     version: 8,
     sources: {
       'google-satellite': {
         type: 'raster',
-        tiles: ['https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}'],
+        tiles: [
+          'https://mt0.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
+          'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
+          'https://mt2.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
+          'https://mt3.google.com/vt/lyrs=s&x={x}&y={y}&z={z}'
+        ],
         tileSize: 256,
         attribution: 'Google'
       }
     },
-    layers: [{ id: 'google-satellite', type: 'raster', source: 'google-satellite' }]
+    layers: [
+      { id: 'background', type: 'background', paint: { 'background-color': '#000000' } },
+      { id: 'google-satellite', type: 'raster', source: 'google-satellite' }
+    ]
   },
   'google-hybrid': {
     version: 8,
     sources: {
       'google-hybrid': {
         type: 'raster',
-        tiles: ['https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'],
+        tiles: [
+          'https://mt0.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+          'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+          'https://mt2.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+          'https://mt3.google.com/vt/lyrs=y&x={x}&y={y}&z={z}'
+        ],
         tileSize: 256,
         attribution: 'Google'
       }
     },
-    layers: [{ id: 'google-hybrid', type: 'raster', source: 'google-hybrid' }]
+    layers: [
+      { id: 'background', type: 'background', paint: { 'background-color': '#000000' } },
+      { id: 'google-hybrid', type: 'raster', source: 'google-hybrid' }
+    ]
   },
   'osm': {
     version: 8,
@@ -54,7 +70,10 @@ const LAYER_CONFIGS: Record<MapLayer, string | any> = {
         attribution: 'OpenStreetMap'
       }
     },
-    layers: [{ id: 'osm-layer', type: 'raster', source: 'osm-tiles' }]
+    layers: [
+      { id: 'background', type: 'background', paint: { 'background-color': '#000000' } },
+      { id: 'osm-layer', type: 'raster', source: 'osm-tiles' }
+    ]
   }
 };
 
@@ -78,7 +97,17 @@ const MapView = ({
 
   useEffect(() => {
     if (map.current && targetCenter) {
-      map.current.flyTo({ center: [targetCenter.lng, targetCenter.lat], zoom: 15 });
+      const currentCenter = map.current.getCenter();
+      const dist = turf.distance(
+        [currentCenter.lng, currentCenter.lat],
+        [targetCenter.lng, targetCenter.lat],
+        { units: 'meters' }
+      );
+      
+      // Only flyTo if the change is more than 5 meters (likely a click/teleport, not slow pan/drift)
+      if (dist > 5) {
+        map.current.flyTo({ center: [targetCenter.lng, targetCenter.lat], zoom: 15 });
+      }
     }
   }, [targetCenter]);
 
@@ -102,19 +131,30 @@ const MapView = ({
     map.current = new maplibregl.Map({
       container: mapContainer.current,
       style: LAYER_CONFIGS[activeLayer],
-      center: [-46.6333, -23.5505], // São Paulo
+      center: [-46.6333, -23.5505],
       zoom: 12,
       pitch: 0,
       bearing: 0,
       dragRotate: true,
-      touchZoomRotate: true
+      touchZoomRotate: true,
+      dragPan: true,
+      scrollZoom: true,
+      touchPitch: true,
+      doubleClickZoom: true
     });
 
-    map.current.addControl(new maplibregl.GeolocateControl({
+    const geolocate = new maplibregl.GeolocateControl({
       positionOptions: { enableHighAccuracy: true },
       trackUserLocation: true,
-      showUserLocation: true
-    }), 'top-right');
+      showUserLocation: true,
+      showAccuracyCircle: true
+    });
+    
+    // Auto-trigger geolocate on first style load but don't add the default button UI
+    // to avoid overlapping with custom UI
+    map.current.once('style.load', () => {
+      geolocate.trigger();
+    });
 
     map.current.on('move', () => {
       if (map.current) {
@@ -139,83 +179,107 @@ const MapView = ({
       }
     });
 
-    map.current.on('load', () => {
+    const onStyleLoad = () => {
       if (!map.current) return;
       
       // Route line
-      map.current.addSource('route', {
-        type: 'geojson',
-        data: {
-          type: 'Feature',
-          properties: {},
-          geometry: {
-            type: 'LineString',
-            coordinates: []
+      if (!map.current.getSource('route')) {
+        map.current.addSource('route', {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            properties: {},
+            geometry: {
+              type: 'LineString',
+              coordinates: []
+            }
           }
-        }
-      });
+        });
 
-      map.current.addLayer({
-        id: 'route-layer',
-        type: 'line',
-        source: 'route',
-        layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': '#3b82f6', 'line-width': 4 }
-      });
+        map.current.addLayer({
+          id: 'route-layer',
+          type: 'line',
+          source: 'route',
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-color': '#3b82f6', 'line-width': 4 }
+        });
+      }
 
       // Measurement line
-      map.current.addSource('measure', {
-        type: 'geojson',
-        data: {
-          type: 'Feature',
-          properties: {},
-          geometry: {
-            type: 'LineString',
-            coordinates: []
+      if (!map.current.getSource('measure')) {
+        map.current.addSource('measure', {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            properties: {},
+            geometry: {
+              type: 'LineString',
+              coordinates: []
+            }
           }
-        }
-      });
+        });
 
-      map.current.addLayer({
-        id: 'measure-layer',
-        type: 'line',
-        source: 'measure',
-        layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': '#ef4444', 'line-width': 2, 'line-dasharray': [2, 1] }
-      });
+        map.current.addLayer({
+          id: 'measure-layer',
+          type: 'line',
+          source: 'measure',
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-color': '#ef4444', 'line-width': 2, 'line-dasharray': [2, 1] }
+        });
+      }
 
       // Area source and layer
-      map.current.addSource('area', {
-        type: 'geojson',
-        data: { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [] } }
-      });
+      if (!map.current.getSource('area')) {
+        map.current.addSource('area', {
+          type: 'geojson',
+          data: { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [] } }
+        });
 
-      map.current.addLayer({
-        id: 'area-layer',
-        type: 'fill',
-        source: 'area',
-        paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.2 }
-      });
+        map.current.addLayer({
+          id: 'area-layer',
+          type: 'fill',
+          source: 'area',
+          paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.2 }
+        });
+      }
       
       // KML source
-      map.current.addSource('imported-kml', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: [] }
-      });
+      if (!map.current.getSource('imported-kml')) {
+        map.current.addSource('imported-kml', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] }
+        });
 
-      map.current.addLayer({
-        id: 'kml-layer',
-        type: 'line',
-        source: 'imported-kml',
-        paint: { 'line-color': '#10b981', 'line-width': 2 }
-      });
+        map.current.addLayer({
+          id: 'kml-layer',
+          type: 'line',
+          source: 'imported-kml',
+          paint: { 'line-color': '#10b981', 'line-width': 2 }
+        });
+      }
+    };
+
+    map.current.on('style.load', onStyleLoad);
+
+    const resizeObserver = new ResizeObserver(() => {
+      map.current?.resize();
     });
+    if (mapContainer.current) {
+      resizeObserver.observe(mapContainer.current);
+    }
 
-    return () => map.current?.remove();
+    return () => {
+      resizeObserver.disconnect();
+      map.current?.remove();
+    };
   }, []);
 
+  const isFirstRender = useRef(true);
   useEffect(() => {
-    if (!map.current) return;
+    if (!map.current || isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
     map.current.setStyle(LAYER_CONFIGS[activeLayer]);
   }, [activeLayer]);
 
@@ -299,7 +363,9 @@ const MapView = ({
   }, [measurementPoints]);
 
   return (
-    <div ref={mapContainer} className="map-container relative">
+    <div className="absolute inset-0 w-full h-full bg-zinc-950 overflow-hidden">
+      <div ref={mapContainer} className="w-full h-full block" />
+      
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none z-10 print:hidden">
         <div className="w-4 h-4 border-2 border-white rounded-full flex items-center justify-center shadow-lg relative">
           <div className="w-1 h-1 bg-white rounded-full" />
@@ -321,10 +387,14 @@ const MapView = ({
       
       {/* SVG for Distance Line from User to Cursor */}
       {distanceToCenter && userLocation && map.current && (
-         <svg className="absolute inset-0 pointer-events-none z-[5]" style={{ width: '100%', height: '100%' }}>
+         <svg className="absolute inset-0 pointer-events-none z-[5] w-full h-full">
             {(() => {
               const userPos = map.current.project([userLocation.lng, userLocation.lat]);
-              const centerPos = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+              const rect = mapContainer.current?.getBoundingClientRect();
+              const centerPos = { 
+                x: rect ? rect.width / 2 : window.innerWidth / 2, 
+                y: rect ? rect.height / 2 : window.innerHeight / 2 
+              };
               return (
                 <>
                   <line 

@@ -18,27 +18,30 @@ export default defineConfig(({ mode }) => {
           short_name: 'PresidentMaps',
           description: 'Aplicação de mapas profissional com navegação offline',
           theme_color: '#09090b',
-          icons: [
-            {
-              src: 'pwa-192x192.png',
-              sizes: '192x192',
-              type: 'image/png'
-            },
-            {
-              src: 'pwa-512x512.png',
-              sizes: '512x512',
-              type: 'image/png'
-            }
-          ]
+          icons: []
         },
         workbox: {
-          globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+          globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/tile\.openstreetmap\.org\/.*/i,
               handler: 'CacheFirst',
               options: {
                 cacheName: 'osm-tiles-cache',
+                expiration: {
+                  maxEntries: 1000,
+                  maxAgeSeconds: 60 * 60 * 24 * 30 // 30 days
+                },
+                cacheableResponse: {
+                  statuses: [0, 200]
+                }
+              }
+            },
+            {
+              urlPattern: /^https:\/\/mt[0-3]\.google\.com\/.*/i,
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'google-tiles-cache',
                 expiration: {
                   maxEntries: 1000,
                   maxAgeSeconds: 60 * 60 * 24 * 30 // 30 days
