@@ -6,8 +6,9 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
-import { MapLayer, POI, AppState, SavedRoute } from '../types';
+import { MapLayer, POI, AppState, SavedRoute, ImportedMap } from '../types';
 import { exportToKML } from '../lib/kml';
+import { processGeoPDF } from '../services/mapImporter';
 import * as turf from '@turf/turf';
 
 interface SidebarProps {
@@ -16,6 +17,7 @@ interface SidebarProps {
   onToggleRecording: () => void;
   onAddPoint: () => void;
   onGoToPOI: (poi: POI) => void;
+  onGoToMap: (map: ImportedMap) => void;
   onEditPOI: (poi: POI) => void;
   onGoToRoute: (route: SavedRoute) => void;
 }
@@ -175,7 +177,7 @@ function RouteItem({ route, onGoToRoute, removeRoute }: RouteItemProps) {
   );
 }
 
-export default function Sidebar({ appState, setAppState, onToggleRecording, onAddPoint, onGoToPOI, onEditPOI, onGoToRoute }: SidebarProps) {
+export default function Sidebar({ appState, setAppState, onToggleRecording, onAddPoint, onGoToPOI, onGoToMap, onEditPOI, onGoToRoute }: SidebarProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'tools' | 'markers' | 'routes' | 'layers' | 'settings'>('tools');
 
@@ -185,11 +187,29 @@ export default function Sidebar({ appState, setAppState, onToggleRecording, onAd
     { id: 'osm', name: 'OpenStreetMap', description: 'Mapa colaborativo global detalhado' },
   ];
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const isGeoPdf = file.name.toLowerCase().endsWith('.pdf');
-      alert(`Importando mapa: "${file.name}"${isGeoPdf ? ' (GeoPDF detectado)' : ''}`);
+      try {
+        const result = await processGeoPDF(file);
+        const newMap: ImportedMap = {
+          id: crypto.randomUUID(),
+          name: file.name,
+          url: result.image,
+          bounds: result.bounds,
+          visible: true
+        };
+        setAppState(prev => ({ 
+          ...prev, 
+          importedMaps: [...prev.importedMaps, newMap],
+          lastCenter: { lat: result.bounds[0][0], lng: result.bounds[0][1] }
+        }));
+        onGoToMap(newMap);
+        alert(`Mapa "${file.name}" importado com sucesso!`);
+      } catch (err) {
+        console.error(err);
+        alert('Erro ao importar PDF. Verifique o arquivo.');
+      }
     }
   };
 
@@ -498,9 +518,51 @@ export default function Sidebar({ appState, setAppState, onToggleRecording, onAd
                       <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-3 px-1">Camadas de Mapa</h3>
                       <label className="w-full flex items-center justify-center gap-3 p-4 bg-zinc-900 border border-zinc-800 rounded-xl font-bold uppercase tracking-widest text-xs hover:border-zinc-600 transition-all text-blue-500 cursor-pointer">
                         <Download className="w-5 h-5" />
-                        Importar Mapa
-                        <input type="file" accept=".pdf,.png,.jpg" className="hidden" onChange={handleFileUpload} />
+                        Importar Mapa (GeoPDF)
+                        <input type="file" accept=".pdf" className="hidden" onChange={handleFileUpload} />
                       </label>
+
+                      {appState.importedMaps.length > 0 && (
+                        <div className="mt-6 space-y-3">
+                          <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-3 px-1">Mapas Importados</h3>
+                          <div className="space-y-2">
+                            {appState.importedMaps.map((map) => (
+                              <div key={map.id} className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-3 flex items-center justify-between gap-3">
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-[11px] font-bold text-white truncate">{map.name}</div>
+                                  <div className="text-[9px] text-zinc-500 truncate">Georreferenciado</div>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <button 
+                                    onClick={() => onGoToMap(map)}
+                                    className="p-1 px-2 bg-blue-500/10 text-blue-400 text-[10px] font-bold uppercase rounded-lg border border-blue-500/20 hover:bg-blue-500 hover:text-white transition-all"
+                                  >
+                                    Ir
+                                  </button>
+                                  <button 
+                                    onClick={() => setAppState(prev => ({
+                                      ...prev,
+                                      importedMaps: prev.importedMaps.map(m => m.id === map.id ? { ...m, visible: !m.visible } : m)
+                                    }))}
+                                    className={cn("p-2 rounded-lg transition-colors", map.visible ? "text-blue-500" : "text-zinc-600")}
+                                  >
+                                    {map.visible ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                                  </button>
+                                  <button 
+                                    onClick={() => setAppState(prev => ({
+                                      ...prev,
+                                      importedMaps: prev.importedMaps.filter(m => m.id !== map.id)
+                                    }))}
+                                    className="p-2 text-zinc-600 hover:text-red-500 transition-colors"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </section>
                   </div>
                 )}

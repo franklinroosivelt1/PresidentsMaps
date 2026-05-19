@@ -15,6 +15,7 @@ const INITIAL_STATE: AppState = {
   pois: [],
   routes: [],
   importedKmls: [],
+  importedMaps: [],
   activeLayer: 'google-hybrid',
   isRecording: false,
   currentRoute: [],
@@ -38,8 +39,13 @@ export default function App() {
     return INITIAL_STATE;
   });
 
-  const [displayCenter, setDisplayCenter] = useState({ lat: -23.5505, lng: -46.6333 });
-  const [navigationTarget, setNavigationTarget] = useState<{ lat: number, lng: number, timestamp: number } | null>(null);
+  const [displayCenter, setDisplayCenter] = useState({ 
+    lat: appState.lastCenter?.lat ?? -23.5505, 
+    lng: appState.lastCenter?.lng ?? -46.6333 
+  });
+  const [navigationTarget, setNavigationTarget] = useState<{ lat: number, lng: number, timestamp: number } | null>(
+    appState.lastCenter ? { ...appState.lastCenter, timestamp: 0 } : null
+  );
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -51,8 +57,8 @@ export default function App() {
   // Persistence
   useEffect(() => {
     const { isRecording, currentRoute, measurementMode, measurementPoints, ...rest } = appState;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(rest));
-  }, [appState.pois, appState.routes, appState.activeLayer, appState.importedKmls, appState.coordinateFormat, appState.distanceUnit]);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...rest, lastCenter: displayCenter }));
+  }, [appState.pois, appState.routes, appState.activeLayer, appState.importedKmls, appState.importedMaps, appState.coordinateFormat, appState.distanceUnit, displayCenter]);
 
   // Track User Location (Always)
   useEffect(() => {
@@ -169,6 +175,7 @@ export default function App() {
         userLocation={userLocation}
         targetCenter={navigationTarget}
         pois={appState.pois} 
+        importedMaps={appState.importedMaps}
         activeLayer={appState.activeLayer}
         currentRoute={appState.currentRoute}
         onCenterChange={(lat, lng) => setDisplayCenter({ lat, lng })}
@@ -185,6 +192,7 @@ export default function App() {
         onToggleRecording={toggleRecording}
         onAddPoint={() => openAddPOIDialog(displayCenter.lat, displayCenter.lng)}
         onGoToPOI={(poi) => setNavigationTarget({ lat: poi.lat, lng: poi.lng, timestamp: Date.now() })}
+        onGoToMap={(map) => setNavigationTarget({ lat: map.bounds[0][0], lng: map.bounds[0][1], timestamp: Date.now() })}
         onGoToRoute={(route) => {
           if (route.points.length > 0) {
             setNavigationTarget({ lat: route.points[0].lat, lng: route.points[0].lng, timestamp: Date.now() });

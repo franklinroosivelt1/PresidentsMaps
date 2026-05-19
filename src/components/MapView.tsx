@@ -2,12 +2,13 @@ import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } f
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { cn } from '../lib/utils';
-import { POI, MapLayer, RoutePoint } from '../types';
+import { POI, MapLayer, RoutePoint, ImportedMap } from '../types';
 import * as turf from '@turf/turf';
 
 interface MapViewProps {
   userLocation: { lat: number; lng: number } | null;
   pois: POI[];
+  importedMaps: ImportedMap[];
   activeLayer: MapLayer;
   currentRoute: RoutePoint[];
   targetCenter?: { lat: number, lng: number, timestamp: number } | null;
@@ -80,6 +81,7 @@ const LAYER_CONFIGS: Record<MapLayer, any> = {
 const MapView = ({ 
   userLocation,
   pois, 
+  importedMaps,
   activeLayer, 
   currentRoute, 
   targetCenter,
@@ -176,7 +178,29 @@ const MapView = ({
     const onStyleLoad = () => {
       if (!map.current) return;
       
-      // Route line
+      // Imported Maps Source Handling
+      importedMaps.forEach(m => {
+        if (!map.current?.getSource(`map-${m.id}`) && m.visible) {
+          const sw = m.bounds[0];
+          const ne = m.bounds[1];
+          map.current?.addSource(`map-${m.id}`, {
+            type: 'image',
+            url: m.url,
+            coordinates: [
+              [sw[1], ne[0]], // tl
+              [ne[1], ne[0]], // tr
+              [ne[1], sw[0]], // br
+              [sw[1], sw[0]]  // bl
+            ]
+          });
+          map.current?.addLayer({
+            id: `map-layer-${m.id}`,
+            type: 'raster',
+            source: `map-${m.id}`,
+            paint: { 'raster-opacity': 0.8 }
+          });
+        }
+      });
       if (!map.current.getSource('route')) {
         map.current.addSource('route', {
           type: 'geojson',
@@ -267,6 +291,55 @@ const MapView = ({
       map.current?.remove();
     };
   }, []);
+
+  useEffect(() => {
+    if (!map.current || !map.current.isStyleLoaded()) return;
+
+    // Manage visibility of imported maps
+    importedMaps.forEach(m => {
+      const sourceId = `map-${m.id}`;
+      const layerId = `map-layer-${m.id}`;
+
+      if (m.visible) {
+        if (!map.current?.getSource(sourceId)) {
+          const sw = m.bounds[0];
+          const ne = m.bounds[1];
+          map.current?.addSource(sourceId, {
+            type: 'image',
+            url: m.url,
+            coordinates: [
+              [sw[1], ne[0]], // tl
+              [ne[1], ne[0]], // tr
+              [ne[1], sw[0]], // br
+              [sw[1], sw[0]]  // bl
+            ]
+          });
+          map.current?.addLayer({
+            id: layerId,
+            type: 'raster',
+            source: sourceId,
+            paint: { 'raster-opacity': 0.8 }
+          });
+        } else {
+          map.current?.setLayoutProperty(layerId, 'visibility', 'visible');
+        }
+      } else {
+        if (map.current?.getLayer(layerId)) {
+          map.current?.setLayoutProperty(layerId, 'visibility', 'none');
+        }
+      }
+    });
+
+    // Remove deleted maps
+    const existingLayerIds = map.current.getStyle().layers?.filter(l => l.id.startsWith('map-layer-')).map(l => l.id.replace('map-layer-', '')) || [];
+    existingLayerIds.forEach(id => {
+      if (!importedMaps.find(m => m.id === id)) {
+        if (map.current?.getLayer(`map-layer-${id}`)) map.current.removeLayer(`map-layer-${id}`);
+        if (map.current?.getSource(`map-${id}`)) map.current.removeSource(`map-${id}`);
+      }
+    });
+
+  }, [importedMaps]);
 
   const isFirstRender = useRef(true);
   useEffect(() => {
