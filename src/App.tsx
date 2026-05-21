@@ -25,7 +25,8 @@ const INITIAL_STATE: AppState = {
   coordinateFormat: 'DMS',
   distanceUnit: 'mt',
   activeTab: 'tools',
-  isSidebarOpen: false
+  isSidebarOpen: false,
+  selectedRouteId: null
 };
 
 export default function App() {
@@ -70,7 +71,55 @@ export default function App() {
   useEffect(() => {
     const { isRecording, currentRoute, measurementMode, measurementPoints, activeTab, isSidebarOpen, ...rest } = appState;
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...rest, lastCenter: displayCenter }));
-  }, [appState.pois, appState.routes, appState.activeLayer, appState.importedKmls, appState.importedMaps, appState.coordinateFormat, appState.distanceUnit, displayCenter]);
+  }, [appState.pois, appState.routes, appState.activeLayer, appState.importedKmls, appState.importedMaps, appState.coordinateFormat, appState.distanceUnit, appState.selectedRouteId, displayCenter]);
+
+  // Screen Wake Lock API integration to retain CPU and GPS in background or locked state
+  const [wakeLock, setWakeLock] = useState<any | null>(null);
+
+  const requestWakeLock = useCallback(async () => {
+    if (!('wakeLock' in navigator)) return;
+    try {
+      const lock = await navigator.wakeLock.request('screen');
+      setWakeLock(lock);
+      console.log('Wake Lock active!');
+    } catch (err) {
+      console.error('Wake Lock failed:', err);
+    }
+  }, []);
+
+  const releaseWakeLock = useCallback(async () => {
+    if (wakeLock) {
+      try {
+        await wakeLock.release();
+        setWakeLock(null);
+        console.log('Wake Lock released.');
+      } catch (err) {
+        console.error('Wake Lock release error:', err);
+      }
+    }
+  }, [wakeLock]);
+
+  // Request/release lock based on isRecording status
+  useEffect(() => {
+    if (appState.isRecording) {
+      requestWakeLock();
+    } else {
+      releaseWakeLock();
+    }
+  }, [appState.isRecording, requestWakeLock, releaseWakeLock]);
+
+  // If page visibility changes (user locks/unlocks or switches tabs), re-acquire Wake Lock
+  useEffect(() => {
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === 'visible' && appState.isRecording) {
+        await requestWakeLock();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [appState.isRecording, requestWakeLock]);
 
   // Track User Location (Always)
   useEffect(() => {
@@ -96,7 +145,11 @@ export default function App() {
         }
       },
       (err) => console.error('Geoloc error:', err),
-      { enableHighAccuracy: true }
+      { 
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 10000 
+      }
     );
     return () => navigator.geolocation.clearWatch(id);
   }, [appState.isRecording, hasInitialLocation]);
@@ -224,6 +277,7 @@ export default function App() {
           if (route.points.length > 0) {
             setNavigationTarget({ lat: route.points[0].lat, lng: route.points[0].lng, timestamp: Date.now() });
           }
+          setAppState(prev => ({ ...prev, selectedRouteId: route.id }));
         }}
         onEditPOI={(poi) => {
           setEditingPOI(poi);
@@ -507,6 +561,9 @@ export default function App() {
                     </span>
                   </div>
                 </div>
+                <span className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider text-center pt-1 border-t border-zinc-800 w-full">
+                  ⚠️ Tela Ativa para Gravação
+                </span>
               </motion.div>
             )}
           </AnimatePresence>

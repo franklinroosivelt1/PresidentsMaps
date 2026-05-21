@@ -32,7 +32,7 @@ export function decimalToDMS(coord: number, isLat: boolean): DMSCoordinate {
 // Convert LatLng to UTM
 export function latLngToUTM(lat: number, lng: number) {
   try {
-    const utm = utmObj.ConvertLatLngToUtm(lat, lng, 1) as any;
+    const utm = (utmObj as any).convertLatLngToUtm(lat, lng, 1);
     return {
       zoneNumber: Math.round(utm.ZoneNumber),
       zoneLetter: utm.ZoneLetter as string,

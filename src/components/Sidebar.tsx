@@ -23,6 +23,18 @@ interface SidebarProps {
   onGoToRoute: (route: SavedRoute) => void;
 }
 
+const convertHexToKmlColor = (hex: string) => {
+  if (!hex) return 'ff0000ff'; // default yellow/red
+  const clean = hex.replace('#', '');
+  if (clean.length === 6) {
+    const r = clean.substring(0, 2);
+    const g = clean.substring(2, 4);
+    const b = clean.substring(4, 6);
+    return `ff${b}${g}${r}`; // aabbggrr
+  }
+  return 'ff0000ff';
+};
+
 interface POIItemProps {
   poi: POI;
   onGoToPOI: (poi: POI) => void;
@@ -34,13 +46,153 @@ interface POIItemProps {
 
 const POIItem = React.memo(function POIItem({ poi, onGoToPOI, onEditPOI, setAppState, removePOI }: POIItemProps) {
   const [showMenu, setShowMenu] = useState(false);
+
+  const handleShareKML = () => {
+    let geometryKML = '';
+    const kmlColor = convertHexToKmlColor(poi.color);
+
+    if (poi.type === 'area' && poi.pathPoints && poi.pathPoints.length > 0) {
+      // Ensure the coordinate loop is closed for LinearRing
+      const coords = [...poi.pathPoints];
+      const first = coords[0];
+      const last = coords[coords.length - 1];
+      if (first.lat !== last.lat || first.lng !== last.lng) {
+        coords.push(first);
+      }
+      const coordString = coords.map(p => `${p.lng},${p.lat},0`).join(' ');
+
+      geometryKML = `
+    <Style id="poly-style">
+      <LineStyle>
+        <color>${kmlColor}</color>
+        <width>2</width>
+      </LineStyle>
+      <PolyStyle>
+        <color>40${kmlColor.substring(2)}</color> <!-- 25% opacity fill -->
+        <fill>1</fill>
+        <outline>1</outline>
+      </PolyStyle>
+    </Style>
+    <Placemark>
+      <name>${poi.name}</name>
+      <description>${poi.description || 'Área salva no aplicativo'}</description>
+      <styleUrl>#poly-style</styleUrl>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+              ${coordString}
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>`;
+    } else if (poi.type === 'path' && poi.pathPoints && poi.pathPoints.length > 0) {
+      const coordString = poi.pathPoints.map(p => `${p.lng},${p.lat},0`).join(' ');
+      geometryKML = `
+    <Style id="line-style">
+      <LineStyle>
+        <color>${kmlColor}</color>
+        <width>4</width>
+      </LineStyle>
+    </Style>
+    <Placemark>
+      <name>${poi.name}</name>
+      <description>${poi.description || 'Trajeto/Caminho salvo no aplicativo'}</description>
+      <styleUrl>#line-style</styleUrl>
+      <LineString>
+        <tessellate>1</tessellate>
+        <coordinates>
+          ${coordString}
+        </coordinates>
+      </LineString>
+    </Placemark>`;
+    } else {
+      // Standard point
+      geometryKML = `
+    <Style id="point-style">
+      <IconStyle>
+        <color>${kmlColor}</color>
+        <scale>1.1</scale>
+      </IconStyle>
+    </Style>
+    <Placemark>
+      <name>${poi.name}</name>
+      <description>${poi.description || 'Ponto de interesse salvo no aplicativo'}</description>
+      <styleUrl>#point-style</styleUrl>
+      <Point>
+        <coordinates>${poi.lng},${poi.lat},0</coordinates>
+      </Point>
+    </Placemark>`;
+    }
+
+    const kmlContent = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>${poi.name}</name>
+    <description>${poi.description || 'Ponto exportado'}</description>
+    ${geometryKML}
+  </Document>
+</kml>`.trim();
+
+    const safeName = poi.name.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'ponto';
+    const filename = `${safeName}.kml`;
+
+    // Try sharing via Web Share API if not in an iframe (to avoid sandbox restrictions)
+    const isIframe = window.self !== window.top;
+    if (!isIframe && navigator.share && navigator.canShare) {
+      try {
+        const file = new File([kmlContent], filename, { type: 'application/vnd.google-earth.kml+xml' });
+        if (navigator.canShare({ files: [file] })) {
+          navigator.share({
+            files: [file],
+            title: poi.name,
+            text: `Ponto KML: ${poi.name}`
+          }).catch(() => {
+            // Quiet fallback to download
+            triggerKmlDownload(kmlContent, filename);
+          });
+          return;
+        }
+      } catch (e) {
+        // Quiet fallback to download
+      }
+    }
+
+    triggerKmlDownload(kmlContent, filename);
+  };
+
+  const triggerKmlDownload = (content: string, filename: string) => {
+    const blob = new Blob([content], { type: 'application/vnd.google-earth.kml+xml' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    alert(`Arquivo KML "${filename}" gerado e baixado com sucesso!`);
+  };
   
   return (
     <div className="group bg-zinc-900/50 border border-zinc-800 rounded-xl p-3 hover:border-zinc-700 transition-all overflow-hidden">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: poi.color }} />
-          <span className={cn("font-bold text-sm truncate", poi.visible === false && "opacity-40 italic")}>{poi.name}</span>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className={cn("font-bold text-sm truncate", poi.visible === false && "opacity-40 italic")}>{poi.name}</span>
+              {poi.pdfTargetId && (
+                <span className="text-[9px] bg-yellow-500/10 text-yellow-500 border border-yellow-500/25 px-1.5 py-0.5 rounded font-mono font-extrabold uppercase shrink-0">
+                  ID: {poi.pdfTargetId}
+                </span>
+              )}
+            </div>
+            {poi.polygonArea ? (
+              <div className="text-[10px] text-zinc-500 font-mono mt-0.5 font-bold uppercase">Área: {poi.polygonArea.toFixed(4)} ha</div>
+            ) : null}
+          </div>
         </div>
         <div className="flex items-center gap-1">
           <button 
@@ -85,13 +237,9 @@ const POIItem = React.memo(function POIItem({ poi, onGoToPOI, onEditPOI, setAppS
                 <Pencil className="w-4 h-4" />
               </button>
               <button 
-                onClick={() => {
-                  const text = `Ponto: ${poi.name}\nLat: ${poi.lat}\nLng: ${poi.lng}`;
-                  navigator.clipboard.writeText(text);
-                  alert('Dados do ponto copiados!');
-                }}
-                className="p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
-                title="Compartilhar"
+                onClick={handleShareKML}
+                className="p-2 text-zinc-500 hover:text-emerald-400 hover:bg-zinc-800 rounded-lg transition-colors"
+                title="Compartilhar KML"
               >
                 <Share2 className="w-4 h-4" />
               </button>
@@ -114,37 +262,169 @@ interface RouteItemProps {
   route: SavedRoute;
   onGoToRoute: (route: SavedRoute) => void;
   removeRoute: (id: string) => void;
+  setAppState: React.Dispatch<React.SetStateAction<AppState>>;
   key?: string | number;
 }
 
-const RouteItem = React.memo(function RouteItem({ route, onGoToRoute, removeRoute }: RouteItemProps) {
+const RouteItem = React.memo(function RouteItem({ route, onGoToRoute, removeRoute, setAppState }: RouteItemProps) {
   const [showMenu, setShowMenu] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState(route.name);
   
+  const handleShareKML = () => {
+    if (!route.points || route.points.length === 0) {
+      alert("Este trajeto não tem pontos gravados para exportar.");
+      return;
+    }
+
+    const coordString = route.points
+      .map(p => `${p.lng},${p.lat},0`)
+      .join(' ');
+
+    const kmlContent = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>${route.name}</name>
+    <description>Trajeto gravado no aplicativo. Distância: ${(route.distance / 1000).toFixed(2)} km</description>
+    <Style id="route-line">
+      <LineStyle>
+        <color>ffff46d9</color> <!-- magenta/pink color matching map highlight in aabbggrr -->
+        <width>5</width>
+      </LineStyle>
+    </Style>
+    <Placemark>
+      <name>${route.name}</name>
+      <styleUrl>#route-line</styleUrl>
+      <LineString>
+        <extrude>1</extrude>
+        <tessellate>1</tessellate>
+        <coordinates>
+          ${coordString}
+        </coordinates>
+      </LineString>
+    </Placemark>
+  </Document>
+</kml>`.trim();
+
+    const safeName = route.name.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'trajeto';
+    const filename = `${safeName}.kml`;
+
+    // Try utilizing Web Share API first for direct mobile exports if not in an iframe (to avoid sandbox blocks)
+    const isIframe = window.self !== window.top;
+    if (!isIframe && navigator.share && navigator.canShare) {
+      try {
+        const file = new File([kmlContent], filename, { type: 'application/vnd.google-earth.kml+xml' });
+        if (navigator.canShare({ files: [file] })) {
+          navigator.share({
+            files: [file],
+            title: route.name,
+            text: `Trajeto KML: ${route.name} (${(route.distance / 1000).toFixed(2)}km)`
+          }).catch(() => {
+            // Quiet fallback
+            triggerKmlDownload(kmlContent, filename);
+          });
+          return;
+        }
+      } catch (e) {
+        // Quiet fallback
+      }
+    }
+
+    // Direct desktop fallback download
+    triggerKmlDownload(kmlContent, filename);
+  };
+
+  const triggerKmlDownload = (content: string, filename: string) => {
+    const blob = new Blob([content], { type: 'application/vnd.google-earth.kml+xml' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    alert(`Arquivo KML "${filename}" gerado e baixado com sucesso!`);
+  };
+
+  const handleSave = () => {
+    const trimmed = editName.trim();
+    if (!trimmed) {
+      alert("Por favor, digite um nome válido para o trajeto.");
+      return;
+    }
+    setAppState(prev => ({
+      ...prev,
+      routes: prev.routes.map(r => r.id === route.id ? { ...r, name: trimmed } : r)
+    }));
+    setIsEditing(false);
+  };
+
   return (
     <div className="group bg-zinc-900/50 border border-zinc-800 rounded-xl p-3 hover:border-zinc-700 transition-all overflow-hidden">
       <div className="flex items-center justify-between gap-3">
         <div className="flex-1 min-w-0">
-          <div className="font-bold text-sm truncate text-white">{route.name}</div>
-          <div className="text-[10px] text-zinc-500 font-mono">{(route.distance / 1000).toFixed(2)} km • {new Date(route.createdAt).toLocaleDateString()}</div>
+          {isEditing ? (
+            <div className="flex items-center gap-1">
+              <input
+                type="text"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="bg-zinc-850 hover:bg-zinc-800 focus:bg-zinc-800 text-white text-xs font-bold border border-zinc-700 rounded px-2 py-1 w-full focus:outline-none focus:border-zinc-500"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSave();
+                  if (e.key === 'Escape') {
+                    setEditName(route.name);
+                    setIsEditing(false);
+                  }
+                }}
+              />
+              <button
+                onClick={handleSave}
+                className="p-1 px-2.5 bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 rounded-lg hover:bg-emerald-500 hover:text-white transition-all text-[10px] font-bold uppercase shrink-0"
+                title="Salvar"
+              >
+                Salvar
+              </button>
+              <button
+                onClick={() => {
+                  setEditName(route.name);
+                  setIsEditing(false);
+                }}
+                className="p-1 px-2 bg-zinc-805 text-zinc-400 border border-zinc-700 rounded-lg hover:bg-zinc-700 hover:text-white transition-all text-xs shrink-0"
+                title="Cancelar"
+              >
+                X
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="font-bold text-sm truncate text-white">{route.name}</div>
+              <div className="text-[10px] text-zinc-500 font-mono">{(route.distance / 1000).toFixed(2)} km • {new Date(route.createdAt).toLocaleDateString()}</div>
+            </>
+          )}
         </div>
-        <div className="flex items-center gap-1">
-          <button 
-            onClick={() => onGoToRoute(route)}
-            className="p-1 px-2 bg-blue-500/10 text-blue-400 text-[10px] font-bold uppercase rounded-lg border border-blue-500/20 hover:bg-blue-500 hover:text-white transition-all"
-          >
-            Ir
-          </button>
-          <button 
-            onClick={() => setShowMenu(!showMenu)}
-            className={cn("p-1.5 rounded-lg transition-colors", showMenu ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-white")}
-          >
-            <Menu className="w-4 h-4" />
-          </button>
-        </div>
+        {!isEditing && (
+          <div className="flex items-center gap-1">
+            <button 
+              onClick={() => onGoToRoute(route)}
+              className="p-1 px-2.5 bg-blue-500/10 text-blue-400 text-[10px] font-bold uppercase rounded-lg border border-blue-500/20 hover:bg-blue-500 hover:text-white transition-all duration-150"
+            >
+              Exibir
+            </button>
+            <button 
+              onClick={() => setShowMenu(!showMenu)}
+              className={cn("p-1.5 rounded-lg transition-colors", showMenu ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-white")}
+            >
+              <Menu className="w-4 h-4" />
+            </button>
+          </div>
+        )}
       </div>
       
       <AnimatePresence>
-        {showMenu && (
+        {showMenu && !isEditing && (
           <motion.div 
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
@@ -154,14 +434,23 @@ const RouteItem = React.memo(function RouteItem({ route, onGoToRoute, removeRout
             <div className="flex items-center gap-1">
               <button 
                 onClick={() => {
-                  const text = `Trajeto: ${route.name}\nDistância: ${(route.distance / 1000).toFixed(2)}km\nData: ${new Date(route.createdAt).toLocaleDateString()}\nPontos: ${route.points.length}`;
-                  navigator.clipboard.writeText(text);
-                  alert('Dados do trajeto copiados!');
+                  setIsEditing(true);
+                  setShowMenu(false);
                 }}
-                className="p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
-                title="Compartilhar"
+                className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors flex items-center gap-1 text-[10px] font-bold"
+                title="Editar Nome"
               >
-                <Share2 className="w-4 h-4" />
+                <Pencil className="w-4 h-4 text-blue-400" />
+                <span className="uppercase tracking-wider">Editar</span>
+              </button>
+
+              <button 
+                onClick={handleShareKML}
+                className="p-2 text-zinc-400 hover:text-emerald-400 hover:bg-zinc-800 rounded-lg transition-colors flex items-center gap-1 text-[10px] font-bold"
+                title="Exportar KML"
+              >
+                <Share2 className="w-4 h-4 text-emerald-400" />
+                <span className="uppercase tracking-wider">KML</span>
               </button>
             </div>
             <button 
@@ -206,42 +495,45 @@ export default function Sidebar({ appState, setAppState, onToggleRecording, onAd
     if (file) {
       try {
         const result = await processGeoPDF(file);
-        const newMap: ImportedMap = {
-          id: crypto.randomUUID(),
-          name: file.name,
-          url: result.image,
-          bounds: result.bounds,
-          visible: true
-        };
-        
         const extractedPois = result.targets || [];
         const hasTargets = extractedPois.length > 0;
         
-        setAppState(prev => ({ 
-          ...prev, 
-          importedMaps: [...prev.importedMaps, newMap],
-          pois: [...prev.pois, ...extractedPois],
-          lastCenter: { lat: result.bounds[0][0], lng: result.bounds[0][1] }
-        }));
-        
-        onGoToMap(newMap);
-        
         if (hasTargets) {
+          const firstPoi = extractedPois[0];
+          setAppState(prev => ({ 
+            ...prev, 
+            pois: [...prev.pois, ...extractedPois],
+            lastCenter: { lat: firstPoi.lat, lng: firstPoi.lng },
+            activeTab: 'markers',
+            isSidebarOpen: true
+          }));
+          
+          onGoToPOI(firstPoi);
+          
           const pointsCount = extractedPois.filter(p => p.type === 'point').length;
           const areasCount = extractedPois.filter(p => p.type === 'area').length;
           alert(
-            `Mapa "${file.name}" importado com sucesso!\n\n` +
+            `Mapa "${file.name}" lido com sucesso!\n\n` +
             `🔍 Detecção de Atributos via IA e Crawler:\n` +
             `• Identificamos ${extractedPois.length} alvos com dados de coordenadas/área impressos no PDF!\n` +
             `• Adicionados: ${pointsCount} pontos de centros e ${areasCount} polígonos/contornos de alvos.\n\n` +
-            `Seus alvos já estão plotados e rotulados em amarelo no mapa!`
+            `Seus alvos já estão plotados e rotulados em amarelo no mapa!\nClique nos pontos para visualizar o balão flutuante correspondente.`
           );
         } else {
-          alert(`Mapa "${file.name}" importado com sucesso!\n\nNota: Não foram identificadas tabelas de coordenadas impressas no texto deste PDF.`);
+          // No targets detected, but let's centralize on bounds center
+          const centerLat = (result.bounds[0][0] + result.bounds[1][0]) / 2;
+          const centerLng = (result.bounds[0][1] + result.bounds[1][1]) / 2;
+          
+          setAppState(prev => ({
+            ...prev,
+            lastCenter: { lat: centerLat, lng: centerLng }
+          }));
+          
+          alert(`Leitura do mapa "${file.name}" concluída!\n\nNota: Não foram identificadas tabelas de coordenadas nem polígonos descritos no texto deste PDF.`);
         }
       } catch (err: any) {
-        console.error("Falha ao importar mapa:", err);
-        alert(`Erro ao importar PDF: ${err.message || 'Verifique o arquivo ou tente outro.'}`);
+        console.error("Falha ao ler dados de mapa:", err);
+        alert(`Erro ao carregar PDF: ${err.message || 'Verifique o arquivo ou tente outro.'}`);
       }
     }
   };
@@ -488,6 +780,7 @@ export default function Sidebar({ appState, setAppState, onToggleRecording, onAd
                               setIsOpen(false);
                             }} 
                             removeRoute={removeRoute} 
+                            setAppState={setAppState}
                           />
                         ))
                       )}

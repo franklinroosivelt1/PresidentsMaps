@@ -479,6 +479,36 @@ interface TextItem {
   height: number;
 }
 
+function generateCircleVertices(centerLat: number, centerLng: number, areaHa: number, numPoints = 16): { lat: number; lng: number }[] {
+  // Area in m^2 = areaHa * 10000
+  // pi * r^2 = areaHa * 10000 => r = sqrt((areaHa * 10000) / pi)
+  const radiusMeters = Math.sqrt((areaHa * 10000) / Math.PI);
+  
+  // Earth radius in meters
+  const earthRadius = 6378137;
+  const points: { lat: number; lng: number }[] = [];
+  
+  for (let i = 0; i < numPoints; i++) {
+    const angle = (i * 2 * Math.PI) / numPoints;
+    
+    // Offset in meters
+    const dx = radiusMeters * Math.cos(angle);
+    const dy = radiusMeters * Math.sin(angle);
+    
+    // Coordinate offsets in radians
+    const dLat = dy / earthRadius;
+    const dLng = dx / (earthRadius * Math.cos((centerLat * Math.PI) / 180));
+    
+    // New coordinates in degrees
+    const lat = centerLat + (dLat * 180) / Math.PI;
+    const lng = centerLng + (dLng * 180) / Math.PI;
+    
+    points.push({ lat, lng });
+  }
+  
+  return points;
+}
+
 // Reconstruct text rows and columns using Y vertical alignment tolerance with X horizontal order
 async function extractTableTargets(page: any): Promise<POI[]> {
   try {
@@ -661,11 +691,13 @@ async function extractTableTargets(page: any): Promise<POI[]> {
           type: 'area',
           visible: true,
           pathPoints: vertices.map(v => ({ lat: v.lat, lng: v.lng })),
-          polygonArea: areaVal
+          polygonArea: areaVal,
+          pdfTargetId: id
         });
       } else {
         // Point POI (center/marker)
         for (const v of vertices) {
+          const hasArea = v.potentialArea && v.potentialArea > 0;
           finalPOIs.push({
             id: crypto.randomUUID(),
             name: id.startsWith('Alvo_') ? `Ponto (${id})` : `Alvo ${id}`,
@@ -674,9 +706,11 @@ async function extractTableTargets(page: any): Promise<POI[]> {
             lng: v.lng,
             color,
             createdAt: Date.now(),
-            type: 'point',
+            type: hasArea ? 'area' : 'point',
             visible: true,
-            polygonArea: v.potentialArea
+            polygonArea: v.potentialArea,
+            pdfTargetId: id,
+            pathPoints: hasArea ? generateCircleVertices(v.lat, v.lng, v.potentialArea!) : undefined
           });
         }
       }

@@ -277,6 +277,28 @@ const MapView = ({
         });
       }
 
+      if (!map.current.getSource('selected-route')) {
+        map.current.addSource('selected-route', {
+          type: 'geojson',
+          data: {
+            type: 'Feature',
+            properties: {},
+            geometry: {
+              type: 'LineString',
+              coordinates: []
+            }
+          }
+        });
+
+        map.current.addLayer({
+          id: 'selected-route-layer',
+          type: 'line',
+          source: 'selected-route',
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: { 'line-color': '#d946ef', 'line-width': 6 }
+        });
+      }
+
       // Measurement line
       if (!map.current.getSource('measure')) {
         map.current.addSource('measure', {
@@ -549,28 +571,34 @@ const MapView = ({
       const el = document.createElement('div');
       el.className = 'marker';
       el.style.display = 'flex';
+      el.style.flexDirection = 'column';
       el.style.alignItems = 'center';
       el.style.justifyContent = 'center';
 
-      let markerHtml = `<div style="background-color: ${poi.color}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 5px rgba(0,0,0,0.3);"></div>`;
-
-      if (poi.type === 'area') {
-        markerHtml = `
-          <div style="background-color: ${poi.color || '#ef4444'}; width: 18px; height: 18px; border-radius: 4px; border: 2px solid white; box-shadow: 0 0 6px rgba(0,0,0,0.4); display: flex; items-center; justify-center; align-items: center; justify-items: center;">
-            <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" style="width: 10px; height: 10px;">
-              <path d="M3 3h18v18H3z"/>
-            </svg>
-          </div>
-        `;
-      } else if (poi.type === 'path') {
-        markerHtml = `
-          <div style="background-color: ${poi.color || '#3b82f6'}; width: 18px; height: 18px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 6px rgba(0,0,0,0.4); display: flex; items-center; justify-center; align-items: center; justify-items: center;">
-            <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" style="width: 10px; height: 10px;">
-              <path d="M4 20l16-16M4 4h4v4M16 16h4v4"/>
-            </svg>
+      const pinColor = poi.color || '#ef4444';
+      const idLabel = poi.pdfTargetId || poi.name;
+      
+      let badgeHtml = '';
+      if (idLabel) {
+        const displayLabel = idLabel.startsWith('Alvo ') ? idLabel.replace('Alvo ', '') : idLabel;
+        badgeHtml = `
+          <div style="background-color: #0c0a09; color: #facc15; font-family: monospace, sans-serif; font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 4px; border: 1.5px solid #facc15; margin-bottom: 3px; white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,0.5); z-index: 10;">
+            ${displayLabel}
           </div>
         `;
       }
+
+      const markerHtml = `
+        <div style="display: flex; flex-direction: column; align-items: center; position: relative; cursor: pointer;">
+          ${badgeHtml}
+          <div style="position: relative; display: flex; align-items: center; justify-content: center;">
+            <svg viewBox="0 0 24 24" fill="${pinColor}" stroke="#1e293b" stroke-width="1.5" style="width: 28px; height: 28px; filter: drop-shadow(0px 2px 3px rgba(0,0,0,0.45));">
+              <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" />
+              <circle cx="12" cy="9" r="3" fill="white" />
+            </svg>
+          </div>
+        </div>
+      `;
 
       el.innerHTML = markerHtml;
 
@@ -583,18 +611,25 @@ const MapView = ({
       const utmStr = `${utm.zoneNumber}${utm.zoneLetter} ${utm.easting}m E ${utm.northing}m N`;
 
       let detailLabel = '';
-      if (poi.type === 'area' && poi.polygonArea) {
-        detailLabel = `<div><b>Área:</b> ${poi.polygonArea} ha</div>`;
+      if (poi.polygonArea) {
+        detailLabel = `<div><b>Área:</b> ${poi.polygonArea.toFixed(4)} ha</div>`;
       } else if (poi.type === 'path' && poi.pathDistance) {
-        detailLabel = `<div><b>Distância:</b> ${poi.pathDistance} km</div>`;
+        detailLabel = `<div><b>Distância:</b> ${poi.pathDistance.toFixed(2)} km</div>`;
+      }
+
+      let pdfIdLabel = '';
+      if (poi.pdfTargetId) {
+        pdfIdLabel = `<div><b>ID Ponto:</b> ${poi.pdfTargetId}</div>`;
       }
 
       const popupContent = `
-        <div style="font-family: sans-serif; padding: 4px; color: #1e293b; max-width: 220px;">
+        <div style="font-family: sans-serif; padding: 4px; color: #1e293b; max-width: 225px;">
           <h3 style="margin: 0 0 2px 0; font-size: 13px; font-weight: bold; color: #0f172a;">${poi.name}</h3>
           ${poi.description ? `<p style="margin: 0 0 6px 0; font-size: 10px; color: #64748b;">${poi.description}</p>` : ''}
           <div style="font-family: monospace; font-size: 9px; background-color: #f8fafc; padding: 5px; border-radius: 6px; border: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 2px;">
+            ${pdfIdLabel}
             ${detailLabel}
+            <div><b>UTM:</b> ${utmStr}</div>
             <div><b>DMS S:</b> ${dmsStr}</div>
             <div><b>DMS W:</b> ${dmsLngStr}</div>
             <div><b>DEC:</b> ${poi.lat.toFixed(6)}, ${poi.lng.toFixed(6)}</div>
@@ -716,6 +751,33 @@ const MapView = ({
       });
     }
   }, [currentRoute, styleLoaded]);
+
+  useEffect(() => {
+    if (!map.current || !styleLoaded) return;
+    const source = map.current.getSource('selected-route') as maplibregl.GeoJSONSource;
+    if (source) {
+      const selectedRoute = appState?.routes?.find((r: any) => r.id === appState?.selectedRouteId);
+      if (selectedRoute && selectedRoute.points.length > 0) {
+        source.setData({
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'LineString',
+            coordinates: selectedRoute.points.map((p: any) => [p.lng, p.lat])
+          }
+        });
+      } else {
+        source.setData({
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'LineString',
+            coordinates: []
+          }
+        });
+      }
+    }
+  }, [appState?.selectedRouteId, appState?.routes, styleLoaded]);
 
   useEffect(() => {
     if (!map.current || !styleLoaded) return;

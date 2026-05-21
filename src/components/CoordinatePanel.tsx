@@ -29,7 +29,7 @@ export default function CoordinatePanel({ lat, lng, format = 'DMS' }: Coordinate
   const getDisplayCoords = () => {
     if (format === 'UTM') {
       try {
-        const utm = utmObj.ConvertLatLngToUtm(lat, lng, 1) as any;
+        const utm = (utmObj as any).convertLatLngToUtm(lat, lng, 1);
         return `${utm.ZoneNumber}${utm.ZoneLetter} ${utm.Easting.toFixed(0)}m E ${utm.Northing.toFixed(0)}m N`;
       } catch (e) {
         return "Erro UTM";

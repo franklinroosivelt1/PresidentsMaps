@@ -11,6 +11,7 @@ export interface POI {
   pathPoints?: { lat: number; lng: number }[];
   polygonArea?: number;
   pathDistance?: number;
+  pdfTargetId?: string;
 }
 
 export interface ImportedKML {
@@ -60,4 +61,5 @@ export interface AppState {
   lastCenter?: { lat: number; lng: number };
   activeTab?: 'tools' | 'markers' | 'routes' | 'layers' | 'settings';
   isSidebarOpen?: boolean;
+  selectedRouteId?: string | null;
 }
