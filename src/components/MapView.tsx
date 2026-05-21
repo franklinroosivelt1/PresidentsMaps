@@ -101,6 +101,7 @@ const MapView = ({
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const markers = useRef<maplibregl.Marker[]>([]);
+  const markersMap = useRef<Record<string, maplibregl.Marker>>({});
   const measurementMarkers = useRef<maplibregl.Marker[]>([]);
   const [rotation, setRotation] = useState(0);
   const [distanceToCenter, setDistanceToCenter] = useState<number | null>(null);
@@ -131,8 +132,30 @@ const MapView = ({
         zoom: 15,
         essential: true 
       });
+
+      // Find if there is a POI near targetCenter and open its popup
+      setTimeout(() => {
+        if (!map.current) return;
+        const matchingPoi = pois.find(p => 
+          Math.abs(p.lat - targetCenter.lat) < 0.0001 && 
+          Math.abs(p.lng - targetCenter.lng) < 0.0001
+        );
+        if (matchingPoi) {
+          const marker = markersMap.current[matchingPoi.id];
+          if (marker) {
+            // Close any open popups first
+            Object.keys(markersMap.current).forEach(key => {
+              const m = markersMap.current[key];
+              if (m && m.getPopup().isOpen()) m.togglePopup();
+            });
+            if (!marker.getPopup().isOpen()) {
+              marker.togglePopup();
+            }
+          }
+        }
+      }, 600); // Wait for flyTo transition to begin or complete
     }
-  }, [targetCenter?.timestamp]);
+  }, [targetCenter?.timestamp, pois]);
 
   useEffect(() => {
     if (!map.current || !userLocation) {
@@ -482,6 +505,7 @@ const MapView = ({
     // Clear old markers
     markers.current.forEach(m => m.remove());
     markers.current = [];
+    markersMap.current = {};
 
     // Add new markers & manage lines/polygons
     pois.forEach(poi => {
@@ -582,7 +606,7 @@ const MapView = ({
       if (idLabel) {
         const displayLabel = idLabel.startsWith('Alvo ') ? idLabel.replace('Alvo ', '') : idLabel;
         badgeHtml = `
-          <div style="background-color: #0c0a09; color: #facc15; font-family: monospace, sans-serif; font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 4px; border: 1.5px solid #facc15; margin-bottom: 3px; white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,0.5); z-index: 10;">
+          <div style="background-color: #ffffff; color: #dc2626; font-family: system-ui, -apple-system, sans-serif; font-size: 11px; font-weight: 900; padding: 2px 6px; border-radius: 4px; border: 1.5px solid #dc2626; margin-bottom: 4px; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,0.35); text-align: center; line-height: 1.2; z-index: 10;">
             ${displayLabel}
           </div>
         `;
@@ -643,6 +667,7 @@ const MapView = ({
         .addTo(map.current!);
       
       markers.current.push(marker);
+      markersMap.current[poi.id] = marker;
     });
 
     // Clean up deleted ones
