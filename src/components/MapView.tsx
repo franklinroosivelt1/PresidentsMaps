@@ -4,6 +4,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { cn } from '../lib/utils';
 import { POI, MapLayer, RoutePoint, ImportedMap } from '../types';
 import * as turf from '@turf/turf';
+import { decimalToDMS, latLngToUTM } from '../lib/coordinates';
 
 interface MapViewProps {
   userLocation: { lat: number; lng: number } | null;
@@ -18,6 +19,9 @@ interface MapViewProps {
   measurementMode: 'off' | 'straight' | 'path' | 'area';
   measurementPoints: { lat: number; lng: number }[];
   onAddMeasurementPoint: (lat: number, lng: number) => void;
+  activeAddPoint?: boolean;
+  tempPoint?: { lat: number; lng: number } | null;
+  appState?: any;
 }
 
 const LAYER_CONFIGS: Record<MapLayer, any> = {
@@ -89,13 +93,18 @@ const MapView = ({
   onMapClick, 
   measurementMode, 
   measurementPoints,
-  onAddMeasurementPoint
+  onAddMeasurementPoint,
+  activeAddPoint,
+  tempPoint,
+  appState
 }: MapViewProps) => {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const markers = useRef<maplibregl.Marker[]>([]);
   const [rotation, setRotation] = useState(0);
   const [distanceToCenter, setDistanceToCenter] = useState<number | null>(null);
+  const [styleLoaded, setStyleLoaded] = useState(false);
+  const userLocationMarkerRef = useRef<maplibregl.Marker | null>(null);
 
   useEffect(() => {
     if (map.current && targetCenter) {
@@ -124,11 +133,34 @@ const MapView = ({
   useEffect(() => {
     if (!mapContainer.current) return;
 
+    let initCenter: [number, number] = [-46.6333, -23.5505];
+    let initZoom = 12;
+
+    const saved = localStorage.getItem('president_maps_v1');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.lastCenter && parsed.lastCenter.lat !== undefined && parsed.lastCenter.lng !== undefined) {
+          const lat = Number(parsed.lastCenter.lat);
+          const lng = Number(parsed.lastCenter.lng);
+          if (!isNaN(lat) && !isNaN(lng)) {
+            initCenter = [lng, lat];
+          }
+        }
+        if (parsed.lastZoom !== undefined) {
+          const zoom = Number(parsed.lastZoom);
+          if (!isNaN(zoom)) {
+            initZoom = zoom;
+          }
+        }
+      } catch (e) {}
+    }
+
     map.current = new maplibregl.Map({
       container: mapContainer.current,
       style: LAYER_CONFIGS[activeLayer],
-      center: [-46.6333, -23.5505],
-      zoom: 12,
+      center: initCenter,
+      zoom: initZoom,
       pitch: 0,
       bearing: 0,
       dragRotate: true,
@@ -137,19 +169,6 @@ const MapView = ({
       scrollZoom: true,
       touchPitch: true,
       doubleClickZoom: true
-    });
-
-    const geolocate = new maplibregl.GeolocateControl({
-      positionOptions: { enableHighAccuracy: true },
-      trackUserLocation: true,
-      showUserLocation: true,
-      showAccuracyCircle: true
-    });
-    
-    // Auto-trigger geolocate on first style load but don't add the default button UI
-    // to avoid overlapping with custom UI
-    map.current.once('style.load', () => {
-      geolocate.trigger();
     });
 
     map.current.on('move', () => {
@@ -177,6 +196,7 @@ const MapView = ({
 
     const onStyleLoad = () => {
       if (!map.current) return;
+      setStyleLoaded(true);
       
       // Imported Maps Source Handling
       importedMaps.forEach(m => {
@@ -198,7 +218,7 @@ const MapView = ({
             id: `map-layer-${m.id}`,
             type: 'raster',
             source: `map-${m.id}`,
-            paint: { 'raster-opacity': 0.8 }
+            paint: { 'raster-opacity': 1.0 }
           });
         }
       });
@@ -294,7 +314,7 @@ const MapView = ({
   }, []);
 
   useEffect(() => {
-    if (!map.current || !map.current.isStyleLoaded()) return;
+    if (!map.current || !styleLoaded) return;
 
     // Manage visibility of imported maps
     importedMaps.forEach(m => {
@@ -320,7 +340,7 @@ const MapView = ({
             id: layerId,
             type: 'raster',
             source: sourceId,
-            paint: { 'raster-opacity': 0.8 }
+            paint: { 'raster-opacity': 1.0 }
           });
         } else {
           map.current?.setLayoutProperty(layerId, 'visibility', 'visible');
@@ -341,7 +361,7 @@ const MapView = ({
       }
     });
 
-  }, [importedMaps]);
+  }, [importedMaps, styleLoaded]);
 
   const isFirstRender = useRef(true);
   useEffect(() => {
@@ -349,38 +369,288 @@ const MapView = ({
       isFirstRender.current = false;
       return;
     }
+    setStyleLoaded(false);
     map.current.setStyle(LAYER_CONFIGS[activeLayer]);
   }, [activeLayer]);
 
+  const tempMarkerRef = useRef<maplibregl.Marker | null>(null);
+
+  // Manage temporary pin ("Alfinete")
   useEffect(() => {
-    if (!map.current) return;
+    if (tempMarkerRef.current) {
+      tempMarkerRef.current.remove();
+      tempMarkerRef.current = null;
+    }
+
+    if (!map.current || !tempPoint) return;
+
+    const el = document.createElement('div');
+    el.className = 'temp-marker';
+    el.innerHTML = `
+      <div class="relative flex items-center justify-center">
+        <div class="absolute w-7 h-7 bg-red-500 rounded-full opacity-40 animate-ping"></div>
+        <div class="w-5 h-5 bg-red-600 rounded-full border-2 border-white shadow-2xl flex items-center justify-center">
+          <div class="w-2 h-2 bg-white rounded-full"></div>
+        </div>
+      </div>
+    `;
+
+    tempMarkerRef.current = new maplibregl.Marker({ element: el })
+      .setLngLat([tempPoint.lng, tempPoint.lat])
+      .addTo(map.current);
+  }, [tempPoint]);
+
+  useEffect(() => {
+    if (!map.current || !styleLoaded) return;
 
     // Clear old markers
     markers.current.forEach(m => m.remove());
     markers.current = [];
 
-    // Add new markers
+    // Add new markers & manage lines/polygons
     pois.forEach(poi => {
+      if (poi.visible === false) {
+        // Hide its layers if they exist
+        const fillLayerId = `poi-fill-${poi.id}`;
+        const lineLayerId = `poi-line-${poi.id}`;
+        if (map.current?.getLayer(fillLayerId)) map.current.setLayoutProperty(fillLayerId, 'visibility', 'none');
+        if (map.current?.getLayer(lineLayerId)) map.current.setLayoutProperty(lineLayerId, 'visibility', 'none');
+        return;
+      }
+
+      // Check if this POI is an Area or Path to register its GeoJSON layers
+      if ((poi.type === 'area' || poi.type === 'path') && poi.pathPoints && poi.pathPoints.length > 0) {
+        const sourceId = `poi-source-${poi.id}`;
+        const fillLayerId = `poi-fill-${poi.id}`;
+        const lineLayerId = `poi-line-${poi.id}`;
+        const coords = poi.pathPoints.map(p => [p.lng, p.lat]);
+
+        let geojson: any = null;
+        if (poi.type === 'area' && coords.length > 2) {
+          geojson = {
+            type: 'Feature',
+            properties: {},
+            geometry: {
+              type: 'Polygon',
+              coordinates: [[...coords, coords[0]]]
+            }
+          };
+        } else if (poi.type === 'path' && coords.length > 0) {
+          geojson = {
+            type: 'Feature',
+            properties: {},
+            geometry: {
+              type: 'LineString',
+              coordinates: coords
+            }
+          };
+        }
+
+        if (geojson) {
+          if (!map.current.getSource(sourceId)) {
+            map.current.addSource(sourceId, { type: 'geojson', data: geojson });
+
+            if (poi.type === 'area') {
+              map.current.addLayer({
+                id: fillLayerId,
+                type: 'fill',
+                source: sourceId,
+                paint: {
+                  'fill-color': poi.color || '#ef4444',
+                  'fill-opacity': 0.3
+                }
+              });
+              map.current.addLayer({
+                id: lineLayerId,
+                type: 'line',
+                source: sourceId,
+                paint: {
+                  'line-color': poi.color || '#ef4444',
+                  'line-width': 2.5
+                }
+              });
+            } else {
+              map.current.addLayer({
+                id: lineLayerId,
+                type: 'line',
+                source: sourceId,
+                layout: { 'line-join': 'round', 'line-cap': 'round' },
+                paint: {
+                  'line-color': poi.color || '#3b82f6',
+                  'line-width': 3
+                }
+              });
+            }
+          } else {
+            // Update data & ensure visible
+            const src = map.current.getSource(sourceId) as maplibregl.GeoJSONSource;
+            if (src) src.setData(geojson);
+            if (map.current.getLayer(fillLayerId)) map.current.setLayoutProperty(fillLayerId, 'visibility', 'visible');
+            if (map.current.getLayer(lineLayerId)) map.current.setLayoutProperty(lineLayerId, 'visibility', 'visible');
+          }
+        }
+      }
+
+      // Create a marker
       const el = document.createElement('div');
       el.className = 'marker';
-      el.style.backgroundColor = poi.color;
-      el.style.width = '12px';
-      el.style.height = '12px';
-      el.style.borderRadius = '50%';
-      el.style.border = '2px solid white';
-      el.style.boxShadow = '0 0 5px rgba(0,0,0,0.3)';
+      el.style.display = 'flex';
+      el.style.alignItems = 'center';
+      el.style.justifyContent = 'center';
 
-      const marker = new maplibregl.Marker(el)
+      let markerHtml = `<div style="background-color: ${poi.color}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 5px rgba(0,0,0,0.3);"></div>`;
+
+      if (poi.type === 'area') {
+        markerHtml = `
+          <div style="background-color: ${poi.color || '#ef4444'}; width: 18px; height: 18px; border-radius: 4px; border: 2px solid white; box-shadow: 0 0 6px rgba(0,0,0,0.4); display: flex; items-center; justify-center; align-items: center; justify-items: center;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" style="width: 10px; height: 10px;">
+              <path d="M3 3h18v18H3z"/>
+            </svg>
+          </div>
+        `;
+      } else if (poi.type === 'path') {
+        markerHtml = `
+          <div style="background-color: ${poi.color || '#3b82f6'}; width: 18px; height: 18px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 6px rgba(0,0,0,0.4); display: flex; items-center; justify-center; align-items: center; justify-items: center;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" style="width: 10px; height: 10px;">
+              <path d="M4 20l16-16M4 4h4v4M16 16h4v4"/>
+            </svg>
+          </div>
+        `;
+      }
+
+      el.innerHTML = markerHtml;
+
+      const dmsLat = decimalToDMS(poi.lat, true);
+      const dmsLng = decimalToDMS(poi.lng, false);
+      const utm = latLngToUTM(poi.lat, poi.lng);
+
+      const dmsStr = `${dmsLat.degrees}° ${dmsLat.minutes}' ${dmsLat.seconds.toFixed(0)}" ${dmsLat.direction}`;
+      const dmsLngStr = `${dmsLng.degrees}° ${dmsLng.minutes}' ${dmsLng.seconds.toFixed(0)}" ${dmsLng.direction}`;
+      const utmStr = `${utm.zoneNumber}${utm.zoneLetter} ${utm.easting}m E ${utm.northing}m N`;
+
+      let detailLabel = '';
+      if (poi.type === 'area' && poi.polygonArea) {
+        detailLabel = `<div><b>Área:</b> ${poi.polygonArea} ha</div>`;
+      } else if (poi.type === 'path' && poi.pathDistance) {
+        detailLabel = `<div><b>Distância:</b> ${poi.pathDistance} km</div>`;
+      }
+
+      const popupContent = `
+        <div style="font-family: sans-serif; padding: 4px; color: #1e293b; max-width: 220px;">
+          <h3 style="margin: 0 0 2px 0; font-size: 13px; font-weight: bold; color: #0f172a;">${poi.name}</h3>
+          ${poi.description ? `<p style="margin: 0 0 6px 0; font-size: 10px; color: #64748b;">${poi.description}</p>` : ''}
+          <div style="font-family: monospace; font-size: 9px; background-color: #f8fafc; padding: 5px; border-radius: 6px; border: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 2px;">
+            ${detailLabel}
+            <div><b>DMS L:</b> ${dmsStr}</div>
+            <div><b>DMS G:</b> ${dmsLngStr}</div>
+            <div><b>UTM:</b> ${utmStr}</div>
+            <div><b>DEC:</b> ${poi.lat.toFixed(6)}, ${poi.lng.toFixed(6)}</div>
+          </div>
+        </div>
+      `;
+
+      const marker = new maplibregl.Marker({ element: el })
         .setLngLat([poi.lng, poi.lat])
-        .setPopup(new maplibregl.Popup({ offset: 25 }).setHTML(`<h3>${poi.name}</h3><p>${poi.description}</p>`))
+        .setPopup(new maplibregl.Popup({ offset: 20 }).setHTML(popupContent))
         .addTo(map.current!);
       
       markers.current.push(marker);
     });
-  }, [pois]);
+
+    // Clean up deleted ones
+    const styleObj = map.current.getStyle();
+    const existingPoiLayers = styleObj.layers?.filter(l => l.id.startsWith('poi-line-') || l.id.startsWith('poi-fill-')) || [];
+    existingPoiLayers.forEach(layer => {
+      const poiId = layer.id.replace('poi-line-', '').replace('poi-fill-', '');
+      if (!pois.find(p => p.id === poiId)) {
+        if (map.current?.getLayer(layer.id)) map.current.removeLayer(layer.id);
+        if (map.current?.getSource(`poi-source-${poiId}`)) map.current.removeSource(`poi-source-${poiId}`);
+      }
+    });
+
+  }, [pois, styleLoaded]);
+
+  // Manage visibility of imported KMLs from appState
+  useEffect(() => {
+    if (!map.current || !styleLoaded || !appState?.importedKmls) return;
+
+    appState.importedKmls.forEach((kml: any) => {
+      const sourceId = `kml-source-${kml.id}`;
+      const lineLayerId = `kml-line-layer-${kml.id}`;
+      const fillLayerId = `kml-fill-layer-${kml.id}`;
+      const circleLayerId = `kml-circle-layer-${kml.id}`;
+
+      if (kml.visible) {
+        if (!map.current?.getSource(sourceId)) {
+          map.current?.addSource(sourceId, {
+            type: 'geojson',
+            data: kml.data
+          });
+
+          // Add Fill layer for Polygons
+          map.current?.addLayer({
+            id: fillLayerId,
+            type: 'fill',
+            source: sourceId,
+            filter: ['==', '$type', 'Polygon'],
+            paint: {
+              'fill-color': '#10b981',
+              'fill-opacity': 0.3
+            }
+          });
+
+          // Add Line layer for Lines/Polygons boundaries
+          map.current?.addLayer({
+            id: lineLayerId,
+            type: 'line',
+            source: sourceId,
+            filter: ['in', '$type', 'LineString', 'Polygon'],
+            paint: {
+              'line-color': '#10b981',
+              'line-width': 2.5
+            }
+          });
+
+          // Add Circle layer for Points
+          map.current?.addLayer({
+            id: circleLayerId,
+            type: 'circle',
+            source: sourceId,
+            filter: ['==', '$type', 'Point'],
+            paint: {
+              'circle-color': '#10b981',
+              'circle-radius': 6,
+              'circle-stroke-color': '#ffffff',
+              'circle-stroke-width': 1.5
+            }
+          });
+        } else {
+          if (map.current?.getLayer(fillLayerId)) map.current.setLayoutProperty(fillLayerId, 'visibility', 'visible');
+          if (map.current?.getLayer(lineLayerId)) map.current.setLayoutProperty(lineLayerId, 'visibility', 'visible');
+          if (map.current?.getLayer(circleLayerId)) map.current.setLayoutProperty(circleLayerId, 'visibility', 'visible');
+        }
+      } else {
+        if (map.current?.getLayer(fillLayerId)) map.current.setLayoutProperty(fillLayerId, 'visibility', 'none');
+        if (map.current?.getLayer(lineLayerId)) map.current.setLayoutProperty(lineLayerId, 'visibility', 'none');
+        if (map.current?.getLayer(circleLayerId)) map.current.setLayoutProperty(circleLayerId, 'visibility', 'none');
+      }
+    });
+
+    // Remove deleted KMLs
+    const style = map.current.getStyle();
+    const existingKmlLayerIds = style.layers?.filter(l => l.id.startsWith('kml-line-layer-')).map(l => l.id.replace('kml-line-layer-', '')) || [];
+    existingKmlLayerIds.forEach(id => {
+      if (!appState.importedKmls.find((k: any) => k.id === id)) {
+        if (map.current?.getLayer(`kml-fill-layer-${id}`)) map.current.removeLayer(`kml-fill-layer-${id}`);
+        if (map.current?.getLayer(`kml-line-layer-${id}`)) map.current.removeLayer(`kml-line-layer-${id}`);
+        if (map.current?.getLayer(`kml-circle-layer-${id}`)) map.current.removeLayer(`kml-circle-layer-${id}`);
+        if (map.current?.getSource(`kml-source-${id}`)) map.current.removeSource(`kml-source-${id}`);
+      }
+    });
+  }, [appState?.importedKmls, styleLoaded]);
 
   useEffect(() => {
-    if (!map.current || !map.current.isStyleLoaded()) return;
+    if (!map.current || !styleLoaded) return;
     const source = map.current.getSource('route') as maplibregl.GeoJSONSource;
     if (source) {
       source.setData({
@@ -392,10 +662,10 @@ const MapView = ({
         }
       });
     }
-  }, [currentRoute]);
+  }, [currentRoute, styleLoaded]);
 
   useEffect(() => {
-    if (!map.current || !map.current.isStyleLoaded()) return;
+    if (!map.current || !styleLoaded) return;
     const lineSource = map.current.getSource('measure') as maplibregl.GeoJSONSource;
     const areaSource = map.current.getSource('area') as maplibregl.GeoJSONSource;
     
@@ -429,7 +699,39 @@ const MapView = ({
         }
       });
     }
-  }, [measurementPoints]);
+  }, [measurementPoints, styleLoaded]);
+
+  // GPS User Location Blue Dot reactive marker
+  useEffect(() => {
+    if (userLocationMarkerRef.current) {
+      userLocationMarkerRef.current.remove();
+      userLocationMarkerRef.current = null;
+    }
+
+    if (!map.current || !styleLoaded || !userLocation) return;
+
+    const el = document.createElement('div');
+    el.className = 'user-location-marker';
+    el.innerHTML = `
+      <div class="relative flex items-center justify-center">
+        <div class="absolute w-6 h-6 bg-blue-500 rounded-full opacity-30 animate-pulse"></div>
+        <div class="w-4 h-4 bg-blue-600 rounded-full border-2 border-white shadow-2xl flex items-center justify-center">
+          <div class="w-1.5 h-1.5 bg-white rounded-full"></div>
+        </div>
+      </div>
+    `;
+
+    userLocationMarkerRef.current = new maplibregl.Marker({ element: el })
+      .setLngLat([userLocation.lng, userLocation.lat])
+      .addTo(map.current);
+
+    return () => {
+      if (userLocationMarkerRef.current) {
+        userLocationMarkerRef.current.remove();
+        userLocationMarkerRef.current = null;
+      }
+    };
+  }, [userLocation, styleLoaded]);
 
   return (
     <div className="absolute inset-0 w-full h-full bg-zinc-950 overflow-hidden">

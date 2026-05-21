@@ -7,6 +7,10 @@ export interface POI {
   color: string;
   createdAt: number;
   visible?: boolean;
+  type?: 'point' | 'area' | 'path';
+  pathPoints?: { lat: number; lng: number }[];
+  polygonArea?: number;
+  pathDistance?: number;
 }
 
 export interface ImportedKML {

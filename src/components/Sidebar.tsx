@@ -9,6 +9,7 @@ import { cn } from '../lib/utils';
 import { MapLayer, POI, AppState, SavedRoute, ImportedMap } from '../types';
 import { exportToKML } from '../lib/kml';
 import { processGeoPDF } from '../services/mapImporter';
+import { parseKMLToGeoJSON } from '../services/kmlParser';
 import * as turf from '@turf/turf';
 
 interface SidebarProps {
@@ -218,14 +219,29 @@ export default function Sidebar({ appState, setAppState, onToggleRecording, onAd
     if (file) {
       const reader = new FileReader();
       reader.onload = (event) => {
-        // In a real app we'd parse KML here. Mocking data for now.
-        const newLayer = {
-          id: crypto.randomUUID(),
-          name: file.name,
-          visible: true,
-          data: {} 
-        };
-        setAppState(prev => ({ ...prev, importedKmls: [...prev.importedKmls, newLayer] }));
+        const text = event.target?.result as string;
+        if (!text) return;
+        try {
+          const geojson = parseKMLToGeoJSON(text);
+          if (geojson && geojson.features && geojson.features.length > 0) {
+            const newLayer = {
+              id: crypto.randomUUID(),
+              name: file.name.replace(/\.[^/.]+$/, ""), // Strip extension
+              visible: true,
+              data: geojson 
+            };
+            setAppState(prev => ({ 
+              ...prev, 
+              importedKmls: [...prev.importedKmls, newLayer] 
+            }));
+            alert(`Camada KML "${file.name}" importada com sucesso! (${geojson.features.length} elementos carregados).`);
+          } else {
+            alert('Nenhum elemento geométrico compatível (e.g., Placemarks com Point/LineString/Polygon) foi encontrado no arquivo KML.');
+          }
+        } catch (err) {
+          console.error("Erro KML:", err);
+          alert('Não foi possível ler este arquivo KML. Verifique o seu formato.');
+        }
       };
       reader.readAsText(file);
     }
@@ -516,11 +532,72 @@ export default function Sidebar({ appState, setAppState, onToggleRecording, onAd
                     
                     <section>
                       <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-3 px-1">Camadas de Mapa</h3>
-                      <label className="w-full flex items-center justify-center gap-3 p-4 bg-zinc-900 border border-zinc-800 rounded-xl font-bold uppercase tracking-widest text-xs hover:border-zinc-600 transition-all text-blue-500 cursor-pointer">
-                        <Download className="w-5 h-5" />
-                        Importar Mapa (GeoPDF)
-                        <input type="file" accept=".pdf" className="hidden" onChange={handleFileUpload} />
-                      </label>
+                      <div className="flex flex-col gap-2">
+                        <label className="w-full flex items-center justify-center gap-3 p-4 bg-zinc-900 border border-zinc-800 rounded-xl font-bold uppercase tracking-widest text-xs hover:border-zinc-600 transition-all text-blue-500 cursor-pointer">
+                          <Download className="w-5 h-5 flex-shrink-0" />
+                          Importar Mapa (GeoPDF)
+                          <input type="file" accept=".pdf" className="hidden" onChange={handleFileUpload} />
+                        </label>
+
+                        <label className="w-full flex items-center justify-center gap-3 p-4 bg-zinc-900 border border-zinc-800 rounded-xl font-bold uppercase tracking-widest text-xs hover:border-zinc-600 transition-all text-emerald-500 cursor-pointer">
+                          <Download className="w-5 h-5 flex-shrink-0 text-emerald-500" />
+                          Importar Camada (KML)
+                          <input type="file" accept=".kml" className="hidden" onChange={handleKmlImport} />
+                        </label>
+                      </div>
+
+                      {appState.importedKmls.length > 0 && (
+                        <div className="mt-6 space-y-3">
+                          <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-3 px-1">Camadas (.KML)</h3>
+                          <div className="space-y-2">
+                            {appState.importedKmls.map((kml) => (
+                              <div key={kml.id} className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-3 flex items-center justify-between gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-[11px] font-bold text-white truncate">{kml.name}</div>
+                                  <div className="text-[9px] text-emerald-500/80 truncate">Vetor / Camada Digital</div>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <button 
+                                    onClick={() => {
+                                      setAppState(prev => ({
+                                        ...prev,
+                                        importedKmls: prev.importedKmls.map(k => k.id === kml.id ? { ...k, visible: !k.visible } : k)
+                                      }));
+                                    }}
+                                    className={cn("p-1.5 rounded-lg transition-colors", kml.visible ? "text-emerald-500" : "text-zinc-600")}
+                                    title={kml.visible ? "Ocultar" : "Mostrar"}
+                                  >
+                                    {kml.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                                  </button>
+                                  <button 
+                                    onClick={() => {
+                                      const kmlText = `Camada KML: ${kml.name}\nElementos: ${kml.data?.features?.length || 0}`;
+                                      navigator.clipboard.writeText(kmlText);
+                                      alert('Informações da camada KML copiadas para área de transferência!');
+                                    }}
+                                    className="p-1.5 text-zinc-500 hover:text-white transition-colors"
+                                    title="Compartilhar"
+                                  >
+                                    <Share2 className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button 
+                                    onClick={() => {
+                                      setAppState(prev => ({
+                                        ...prev,
+                                        importedKmls: prev.importedKmls.filter(k => k.id !== kml.id)
+                                      }));
+                                    }}
+                                    className="p-1.5 text-zinc-650 hover:text-red-500 transition-colors"
+                                    title="Excluir"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
 
                       {appState.importedMaps.length > 0 && (
                         <div className="mt-6 space-y-3">
