@@ -6,7 +6,7 @@ import POIDialog from './components/POIDialog';
 import { AppState, POI, RoutePoint, SavedRoute } from './types';
 import * as turf from '@turf/turf';
 import { cn } from './lib/utils';
-import { Activity, Navigation } from 'lucide-react';
+import { Activity, Navigation, Save, Trash2, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ManualPointOverlay from './components/ManualPointOverlay';
 
@@ -23,7 +23,9 @@ const INITIAL_STATE: AppState = {
   measurementMode: 'off',
   measurementPoints: [],
   coordinateFormat: 'DMS',
-  distanceUnit: 'mt'
+  distanceUnit: 'mt',
+  activeTab: 'tools',
+  isSidebarOpen: false
 };
 
 export default function App() {
@@ -52,6 +54,12 @@ export default function App() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [pendingPOI, setPendingPOI] = useState<{ lat: number; lng: number } | null>(null);
   const [editingPOI, setEditingPOI] = useState<POI | null>(null);
+  const [measurementName, setMeasurementName] = useState('');
+
+  // Reset measurement name on mode change
+  useEffect(() => {
+    setMeasurementName('');
+  }, [appState.measurementMode]);
 
   const [activeAddPoint, setActiveAddPoint] = useState(false);
   const [tempPoint, setTempPoint] = useState<{ lat: number; lng: number } | null>(null);
@@ -60,7 +68,7 @@ export default function App() {
 
   // Persistence
   useEffect(() => {
-    const { isRecording, currentRoute, measurementMode, measurementPoints, ...rest } = appState;
+    const { isRecording, currentRoute, measurementMode, measurementPoints, activeTab, isSidebarOpen, ...rest } = appState;
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...rest, lastCenter: displayCenter }));
   }, [appState.pois, appState.routes, appState.activeLayer, appState.importedKmls, appState.importedMaps, appState.coordinateFormat, appState.distanceUnit, displayCenter]);
 
@@ -311,6 +319,25 @@ export default function App() {
         />
       )}
 
+      {/* FAB Check Button for center marking in measurement mode */}
+      <AnimatePresence>
+        {appState.measurementMode !== 'off' && (
+          <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-20 print:hidden">
+            <motion.button
+              initial={{ opacity: 0, y: 15, scale: 0.9 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 15, scale: 0.9 }}
+              onClick={() => handleAddMeasurementPoint(displayCenter.lat, displayCenter.lng)}
+              className="bg-emerald-700 hover:bg-emerald-600 border border-emerald-600/40 text-white font-bold py-3 px-5 rounded-full shadow-2xl flex items-center gap-2 text-xs uppercase tracking-widest transition-all active:scale-95 cursor-pointer font-sans"
+              title="Marcar ponto no local desejado (Check)"
+            >
+              <Check className="w-4 h-4" />
+              <span>Marcar Ponto</span>
+            </motion.button>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Search HUD Placeholder (Standard Browser Search or can be refined) */}
       <div className="absolute top-4 right-4 z-20 pointer-events-none flex flex-col items-end gap-3 max-w-[calc(100vw-32px)]">
           <AnimatePresence>
@@ -319,10 +346,10 @@ export default function App() {
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.95 }}
-                className="bg-red-600 text-white p-4 rounded-2xl shadow-2xl pointer-events-auto flex flex-col items-center min-w-[200px] border border-red-500/50 backdrop-blur"
+                className="bg-[#384a34] text-[#f4f7f4] p-4 rounded-2xl shadow-2xl pointer-events-auto flex flex-col items-center min-w-[200px] border border-[#50664b]/60 backdrop-blur"
               >
                 <div className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-80 mb-1">
-                  {appState.measurementMode === 'area' ? '📐 Medir Área (ha)' : '📏 Medir Distância (km)'}
+                  {appState.measurementMode === 'area' ? '📐 Calcular Área' : '📏 Medir Distância (km)'}
                 </div>
                 
                 <div className="font-mono text-lg font-bold">
@@ -332,7 +359,7 @@ export default function App() {
                         {(turf.area(turf.polygon([[...appState.measurementPoints, appState.measurementPoints[0]].map(p => [p.lng, p.lat])])) / 10000).toFixed(2)} ha
                       </span>
                     ) : (
-                      <span className="text-[10px] font-sans font-medium opacity-80 block text-center max-w-[150px]">Toque em 3+ pontos para estimar área</span>
+                      <span className="text-[10px] font-sans font-medium opacity-80 block text-center max-w-[150px]">Selecione ao menos 3 pontos para calcular uma área.</span>
                     )
                   ) : (
                     appState.measurementPoints.length > 1 ? (
@@ -348,21 +375,30 @@ export default function App() {
                   )}
                 </div>
 
+                {appState.measurementPoints.length >= (appState.measurementMode === 'area' ? 3 : 2) && (
+                  <div className="w-full mt-3 flex flex-col gap-1 text-left pointer-events-auto">
+                    <label className="text-[9px] uppercase tracking-wider text-[#93c5fd]/80 font-semibold font-sans">Nome do elemento</label>
+                    <input
+                      type="text"
+                      value={measurementName}
+                      onChange={(e) => setMeasurementName(e.target.value)}
+                      placeholder={appState.measurementMode === 'area' ? 'Área Demarcada' : 'Caminho Criado'}
+                      className="w-full bg-[#2a3c26] text-white text-xs px-2.5 py-1.5 rounded-lg border border-[#50664b]/65 focus:outline-none focus:border-yellow-400 placeholder-[#bfc8bd]/50 font-sans"
+                    />
+                  </div>
+                )}
+
                 <div className="flex gap-2 w-full mt-3 font-sans">
                   <button 
                     onClick={() => {
                       const modeIsArea = appState.measurementMode === 'area';
                       const minPoints = modeIsArea ? 3 : 2;
                       if (appState.measurementPoints.length < minPoints) {
-                        alert(modeIsArea ? 'Selecione pelo menos 3 pontos antes de salvar a área.' : 'Selecione pelo menos 2 pontos antes de salvar o caminho.');
                         return;
                       }
 
                       const defaultName = modeIsArea ? 'Área Demarcada' : 'Caminho Criado';
-                      const nameInput = prompt('Nome deste elemento:', defaultName);
-                      if (nameInput === null) return; // Cancelled
-
-                      const finalName = nameInput.trim() || defaultName;
+                      const finalName = measurementName.trim() || defaultName;
 
                       // Calculate average centroid/start
                       let sumLat = 0;
@@ -389,7 +425,7 @@ export default function App() {
                           : `Identificação de Caminho criado (${calcVal.toFixed(3)} km)`,
                         lat: avgLat,
                         lng: avgLng,
-                        color: modeIsArea ? '#ef4444' : '#3b82f6',
+                        color: modeIsArea ? '#eab308' : '#3b82f6', // Changed to match yellow
                         createdAt: Date.now(),
                         visible: true,
                         type: modeIsArea ? 'area' : 'path',
@@ -402,14 +438,17 @@ export default function App() {
                         ...prev,
                         pois: [...prev.pois, newPOI],
                         measurementMode: 'off',
-                        measurementPoints: []
+                        measurementPoints: [],
+                        isSidebarOpen: true,
+                        activeTab: 'markers'
                       }));
-                      alert(`${finalName} foi adicionado à listagem de Pontos Criados!`);
+                      setMeasurementName('');
                     }}
                     disabled={appState.measurementPoints.length < (appState.measurementMode === 'area' ? 3 : 2)}
-                    className="flex-1 bg-white hover:bg-zinc-100 disabled:bg-white/40 disabled:text-zinc-500 disabled:cursor-not-allowed text-red-650 font-bold py-1.5 px-3 rounded-lg text-[9px] uppercase tracking-wider transition-colors cursor-pointer"
+                    className="flex-1 flex items-center justify-center bg-white hover:bg-zinc-100 disabled:bg-white/20 disabled:text-zinc-500 disabled:cursor-not-allowed text-[#384a34] font-bold py-1.5 px-3 rounded-lg transition-colors cursor-pointer"
+                    title="Salvar"
                   >
-                    Salvar
+                    <Save className="w-4 h-4" />
                   </button>
                   <button 
                     onClick={() => {
@@ -418,10 +457,12 @@ export default function App() {
                         measurementMode: 'off',
                         measurementPoints: []
                       }));
+                      setMeasurementName('');
                     }}
-                    className="flex-1 bg-black/40 hover:bg-black/60 text-white font-bold py-1.5 px-3 rounded-lg text-[9px] uppercase tracking-wider transition-colors cursor-pointer"
+                    className="flex-1 flex items-center justify-center bg-black/40 hover:bg-black/60 text-white font-bold py-1.5 px-3 rounded-lg transition-colors cursor-pointer"
+                    title="Excluir"
                   >
-                    Excluir
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
               </motion.div>

@@ -101,10 +101,28 @@ const MapView = ({
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const markers = useRef<maplibregl.Marker[]>([]);
+  const measurementMarkers = useRef<maplibregl.Marker[]>([]);
   const [rotation, setRotation] = useState(0);
   const [distanceToCenter, setDistanceToCenter] = useState<number | null>(null);
   const [styleLoaded, setStyleLoaded] = useState(false);
   const userLocationMarkerRef = useRef<maplibregl.Marker | null>(null);
+
+  // Use callback ref to avoid stale closures in map event handlers
+  const callbackRefs = useRef({
+    onMapClick,
+    onAddMeasurementPoint,
+    measurementMode,
+    activeAddPoint
+  });
+
+  useEffect(() => {
+    callbackRefs.current = {
+      onMapClick,
+      onAddMeasurementPoint,
+      measurementMode,
+      activeAddPoint
+    };
+  }, [onMapClick, onAddMeasurementPoint, measurementMode, activeAddPoint]);
 
   useEffect(() => {
     if (map.current && targetCenter) {
@@ -187,10 +205,11 @@ const MapView = ({
     });
 
     map.current.on('click', (e) => {
-      if (measurementMode !== 'off') {
-        onAddMeasurementPoint(e.lngLat.lat, e.lngLat.lng);
+      const { measurementMode: currentMode, onAddMeasurementPoint: clickMeasure, onMapClick: clickMap } = callbackRefs.current;
+      if (currentMode !== 'off') {
+        clickMeasure(e.lngLat.lat, e.lngLat.lng);
       } else {
-        onMapClick(e.lngLat.lat, e.lngLat.lng);
+        clickMap(e.lngLat.lat, e.lngLat.lng);
       }
     });
 
@@ -263,7 +282,7 @@ const MapView = ({
           type: 'line',
           source: 'measure',
           layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: { 'line-color': '#ef4444', 'line-width': 2, 'line-dasharray': [2, 1] }
+          paint: { 'line-color': '#facc15', 'line-width': 3.5, 'line-dasharray': [2, 1] }
         });
       }
 
@@ -278,7 +297,7 @@ const MapView = ({
           id: 'area-layer',
           type: 'fill',
           source: 'area',
-          paint: { 'fill-color': '#ef4444', 'fill-opacity': 0.2 }
+          paint: { 'fill-color': '#facc15', 'fill-opacity': 0.25 }
         });
       }
       
@@ -385,19 +404,26 @@ const MapView = ({
     if (!map.current || !tempPoint) return;
 
     const el = document.createElement('div');
-    el.className = 'temp-marker';
+    el.className = 'temp-marker cursor-grab active:cursor-grabbing';
     el.innerHTML = `
       <div class="relative flex items-center justify-center">
-        <div class="absolute w-7 h-7 bg-red-500 rounded-full opacity-40 animate-ping"></div>
-        <div class="w-5 h-5 bg-red-600 rounded-full border-2 border-white shadow-2xl flex items-center justify-center">
+        <div class="absolute w-7 h-7 bg-emerald-500 rounded-full opacity-40 animate-ping"></div>
+        <div class="w-5 h-5 bg-emerald-600 rounded-full border-2 border-white shadow-2xl flex items-center justify-center">
           <div class="w-2 h-2 bg-white rounded-full"></div>
         </div>
       </div>
     `;
 
-    tempMarkerRef.current = new maplibregl.Marker({ element: el })
+    tempMarkerRef.current = new maplibregl.Marker({ element: el, draggable: true })
       .setLngLat([tempPoint.lng, tempPoint.lat])
       .addTo(map.current);
+
+    tempMarkerRef.current.on('dragend', () => {
+      if (tempMarkerRef.current) {
+        const lngLat = tempMarkerRef.current.getLngLat();
+        callbackRefs.current.onMapClick(lngLat.lat, lngLat.lng);
+      }
+    });
   }, [tempPoint]);
 
   useEffect(() => {
@@ -541,9 +567,8 @@ const MapView = ({
           ${poi.description ? `<p style="margin: 0 0 6px 0; font-size: 10px; color: #64748b;">${poi.description}</p>` : ''}
           <div style="font-family: monospace; font-size: 9px; background-color: #f8fafc; padding: 5px; border-radius: 6px; border: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 2px;">
             ${detailLabel}
-            <div><b>DMS L:</b> ${dmsStr}</div>
-            <div><b>DMS G:</b> ${dmsLngStr}</div>
-            <div><b>UTM:</b> ${utmStr}</div>
+            <div><b>DMS S:</b> ${dmsStr}</div>
+            <div><b>DMS W:</b> ${dmsLngStr}</div>
             <div><b>DEC:</b> ${poi.lat.toFixed(6)}, ${poi.lng.toFixed(6)}</div>
           </div>
         </div>
@@ -699,6 +724,37 @@ const MapView = ({
         }
       });
     }
+
+    // Clear old measurement markers
+    measurementMarkers.current.forEach(m => m.remove());
+    measurementMarkers.current = [];
+
+    // Redraw measurement point pins in a medium-dark yellow/amber tone
+    measurementPoints.forEach((p, idx) => {
+      const el = document.createElement('div');
+      el.className = 'measurement-point-marker';
+      el.style.display = 'flex';
+      el.style.alignItems = 'center';
+      el.style.justifyContent = 'center';
+      el.innerHTML = `
+        <div class="relative flex items-center justify-center">
+          <div class="absolute w-5 h-5 bg-yellow-400 rounded-full opacity-35 animate-pulse"></div>
+          <div class="w-4 h-4 bg-amber-600 rounded-full border border-white shadow-lg flex items-center justify-center text-white" style="font-family: system-ui, sans-serif; box-shadow: 0 1px 3px rgba(0,0,0,0.4);">
+            <span class="text-[8px] font-extrabold leading-none">${idx + 1}</span>
+          </div>
+        </div>
+      `;
+
+      const marker = new maplibregl.Marker({ element: el })
+        .setLngLat([p.lng, p.lat])
+        .addTo(map.current!);
+      measurementMarkers.current.push(marker);
+    });
+
+    return () => {
+      measurementMarkers.current.forEach(m => m.remove());
+      measurementMarkers.current = [];
+    };
   }, [measurementPoints, styleLoaded]);
 
   // GPS User Location Blue Dot reactive marker

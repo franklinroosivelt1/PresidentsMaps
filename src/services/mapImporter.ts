@@ -1,8 +1,11 @@
 import * as pdfjs from 'pdfjs-dist';
 
-// Initialize PDF.js worker - Use unpkg for reliability with specific version
-const PDFJS_VERSION = '5.7.284';
-pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.mjs`;
+// Since some browsers in sandboxed iframes block cross-origin Web Workers, 
+// we configure the PDF.js worker using a local same-origin URL built by Vite.
+pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url
+).toString();
 
 export interface GeoPDFMetadata {
   bounds: [[number, number], [number, number]]; // [sw, ne] fallback
@@ -28,8 +31,13 @@ export async function processGeoPDF(file: File): Promise<GeoPDFMetadata> {
     const pageWidth = originalViewport.width;
     const pageHeight = originalViewport.height;
 
-    // Try to find GeoPDF metadata in the binary if possible (best effort)
-    const result = await findGeoMetadata(data, pageWidth, pageHeight);
+    // 1. Try to extract grid coordinates printed in the PDF's text layer (super precise!)
+    let result = await extractCoordsFromText(page, pageWidth, pageHeight);
+
+    // 2. Fallback to finding GeoPDF metadata in the binary if text layer grids are not found
+    if (!result) {
+      result = await findGeoMetadata(data, pageWidth, pageHeight);
+    }
     
     const viewport = page.getViewport({ scale: 1.5 });
     const canvas = document.createElement('canvas');
@@ -59,13 +67,168 @@ export async function processGeoPDF(file: File): Promise<GeoPDFMetadata> {
   }
 }
 
+function linearRegression(points: { key: number; val: number }[]) {
+  if (points.length < 2) return null;
+  let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+  const n = points.length;
+  for (const p of points) {
+    sumX += p.key;
+    sumY += p.val;
+    sumXY += p.key * p.val;
+    sumXX += p.key * p.key;
+  }
+  const denom = n * sumXX - sumX * sumX;
+  if (Math.abs(denom) < 1e-8) return null;
+  const slope = (n * sumXY - sumX * sumY) / denom;
+  const intercept = (sumY - slope * sumX) / n;
+  return { slope, intercept };
+}
+
+function parseDMSToDecimal(str: string): number | null {
+  // Normalize commas to points
+  const clean = str.replace(/,/g, '.').trim();
+  
+  // Matches DMS like: 8°50'25.3"S, -69°30'36,000", -8°49'12", 9°36'00"
+  const dmsMatch = clean.match(/(-?\d+(?:\.\d+)?)\s*°\s*(?:(\d+(?:\.\d+)?)\s*'\s*(?:(\d+(?:\.\d+)?)\s*["”]?)?)?\s*([NSWEOO])?/i);
+  if (!dmsMatch) return null;
+  
+  const degVal = parseFloat(dmsMatch[1]);
+  const minVal = dmsMatch[2] ? parseFloat(dmsMatch[2]) : 0;
+  const secVal = dmsMatch[3] ? parseFloat(dmsMatch[3]) : 0;
+  const hemi = dmsMatch[4]?.toUpperCase();
+  
+  let val = Math.abs(degVal) + minVal / 60 + secVal / 3600;
+  if (degVal < 0 || hemi === 'S' || hemi === 'W' || hemi === 'O') {
+    val = -val;
+  }
+  return val;
+}
+
+function fitRobustLine(points: { key: number; val: number }[]) {
+  if (points.length < 2) return null;
+  
+  // RANSAC consensus to find collinear grid labels and discard any table cells or text noise
+  let bestSlope = 0;
+  let bestIntercept = 0;
+  let maxInliers = 0;
+  let bestInliers: { key: number; val: number }[] = [];
+  
+  // Check all pairs to find the line with the maximum number of inliers
+  for (let i = 0; i < points.length; i++) {
+    for (let j = i + 1; j < points.length; j++) {
+      const p1 = points[i];
+      const p2 = points[j];
+      
+      const dk = p2.key - p1.key;
+      if (Math.abs(dk) < 5) continue; // skip points too close vertically/horizontally
+      
+      const slope = (p2.val - p1.val) / dk;
+      const intercept = p1.val - slope * p1.key;
+      
+      // Count inliers (points close to this line)
+      const inliers = points.filter(p => {
+        const expectedVal = slope * p.key + intercept;
+        return Math.abs(p.val - expectedVal) < 0.001; // tight tolerance
+      });
+      
+      if (inliers.length > maxInliers) {
+        maxInliers = inliers.length;
+        bestSlope = slope;
+        bestIntercept = intercept;
+        bestInliers = inliers;
+      }
+    }
+  }
+  
+  if (maxInliers >= 2) {
+    return linearRegression(bestInliers);
+  }
+  
+  // Fallback to simple regression if consensus fails
+  return linearRegression(points);
+}
+
+async function extractCoordsFromText(
+  page: any, 
+  pageWidth: number, 
+  pageHeight: number
+): Promise<{ bounds: [[number, number], [number, number]], coordinates?: [[number, number], [number, number], [number, number], [number, number]] } | null> {
+  try {
+    const textContent = await page.getTextContent();
+    const items = textContent.items as any[];
+    
+    const candidates: { val: number; x: number; y: number; str: string }[] = [];
+    
+    for (const item of items) {
+      if (!item.str || !item.transform) continue;
+      const str = item.str.trim();
+      
+      if (str.includes('°')) {
+        const val = parseDMSToDecimal(str);
+        if (val !== null && !isNaN(val)) {
+          const x = item.transform[4];
+          const y = item.transform[5];
+          candidates.push({ val, x, y, str });
+        }
+      }
+    }
+    
+    if (candidates.length === 0) return null;
+    
+    // Classify into Latitude and Longitude candidates (generous South America / Acre bounds)
+    // Latitude is typically between -40.0 and +10.0
+    // Longitude is typically between -85.0 and -30.0
+    const latCandidates = candidates.filter(c => c.val >= -40.0 && c.val <= 10.0);
+    const lngCandidates = candidates.filter(c => c.val >= -85.0 && c.val <= -30.0);
+    
+    const latRegression = fitRobustLine(latCandidates.map(c => ({ key: c.y, val: c.val })));
+    const lngRegression = fitRobustLine(lngCandidates.map(c => ({ key: c.x, val: c.val })));
+    
+    if (latRegression && lngRegression) {
+      const LatY = (y: number) => latRegression.slope * y + latRegression.intercept;
+      const LngX = (x: number) => lngRegression.slope * x + lngRegression.intercept;
+      
+      const fullMinLat = LatY(0);
+      const fullMaxLat = LatY(pageHeight);
+      const fullMinLon = LngX(0);
+      const fullMaxLon = LngX(pageWidth);
+      
+      console.log("Robust georeferenced bounds:", fullMinLat, fullMaxLat, fullMinLon, fullMaxLon);
+      
+      return {
+        bounds: [[fullMinLat, fullMinLon], [fullMaxLat, fullMaxLon]],
+        coordinates: [
+          [fullMinLon, fullMaxLat], // tl
+          [fullMaxLon, fullMaxLat], // tr
+          [fullMaxLon, fullMinLat], // br
+          [fullMinLon, fullMinLat]  // bl
+        ]
+      };
+    }
+  } catch (err) {
+    console.error("Error in text coordinate extraction:", err);
+  }
+  return null;
+}
+
 async function findGeoMetadata(
   data: Uint8Array, 
   pageWidth: number, 
   pageHeight: number
 ): Promise<{ bounds: [[number, number], [number, number]], coordinates?: [[number, number], [number, number], [number, number], [number, number]] } | null> {
+  // Only decode the metadata segments (first 500KB and last 500KB of binary)
+  // Georeference dictionary objects are loaded at the startup or trailer tables, skips giant compressed image blobs.
+  let dataToDecode = data;
+  if (data.length > 1000000) {
+    const head = data.slice(0, 500000);
+    const tail = data.slice(data.length - 500000);
+    dataToDecode = new Uint8Array(head.length + tail.length);
+    dataToDecode.set(head, 0);
+    dataToDecode.set(tail, head.length);
+  }
+
   const decoder = new TextDecoder('ascii');
-  const text = decoder.decode(data.slice(0, 1000000)); // Scan first 1MB
+  const text = decoder.decode(dataToDecode);
   
   // 1. Try to find GPTS (Ground Points) and LPTS (Local Points) from GeoPDF standard with multiline support
   const gptsMatch = text.match(/\/GPTS\s*\[([\s\S]*?)\]/);

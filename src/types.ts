@@ -58,4 +58,6 @@ export interface AppState {
   coordinateFormat: 'DMS' | 'UTM';
   distanceUnit: 'mt' | 'km';
   lastCenter?: { lat: number; lng: number };
+  activeTab?: 'tools' | 'markers' | 'routes' | 'layers' | 'settings';
+  isSidebarOpen?: boolean;
 }

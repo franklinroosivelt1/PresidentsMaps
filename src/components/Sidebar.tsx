@@ -179,8 +179,21 @@ const RouteItem = React.memo(function RouteItem({ route, onGoToRoute, removeRout
 });
 
 export default function Sidebar({ appState, setAppState, onToggleRecording, onAddPoint, onGoToPOI, onGoToMap, onEditPOI, onGoToRoute }: SidebarProps) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'tools' | 'markers' | 'routes' | 'layers' | 'settings'>('tools');
+  const isOpen = appState.isSidebarOpen ?? false;
+  const setIsOpen = (val: boolean | ((p: boolean) => boolean)) => {
+    setAppState(prev => ({
+      ...prev,
+      isSidebarOpen: typeof val === 'function' ? val(prev.isSidebarOpen ?? false) : val
+    }));
+  };
+
+  const activeTab = appState.activeTab ?? 'tools';
+  const setActiveTab = (val: 'tools' | 'markers' | 'routes' | 'layers' | 'settings' | ((p: any) => any)) => {
+    setAppState(prev => ({
+      ...prev,
+      activeTab: typeof val === 'function' ? val(prev.activeTab ?? 'tools') : val
+    }));
+  };
 
   const layers: { id: MapLayer; name: string; description: string }[] = [
     { id: 'google-satellite', name: 'Google Satélite', description: 'Imagens de satélite puras' },
@@ -369,7 +382,10 @@ export default function Sidebar({ appState, setAppState, onToggleRecording, onAd
                         {layers.map((layer) => (
                           <button
                             key={layer.id}
-                            onClick={() => setAppState(prev => ({ ...prev, activeLayer: layer.id }))}
+                            onClick={() => {
+                              setAppState(prev => ({ ...prev, activeLayer: layer.id }));
+                              setIsOpen(false);
+                            }}
                             className={cn(
                               "w-full p-3 rounded-xl border text-left transition-all",
                               appState.activeLayer === layer.id 
@@ -406,7 +422,10 @@ export default function Sidebar({ appState, setAppState, onToggleRecording, onAd
                             <POIItem 
                               key={poi.id} 
                               poi={poi} 
-                              onGoToPOI={onGoToPOI} 
+                              onGoToPOI={(p) => {
+                                onGoToPOI(p);
+                                setIsOpen(false);
+                              }} 
                               onEditPOI={onEditPOI}
                               setAppState={setAppState} 
                               removePOI={removePOI} 
@@ -445,7 +464,10 @@ export default function Sidebar({ appState, setAppState, onToggleRecording, onAd
                           <RouteItem 
                             key={route.id} 
                             route={route} 
-                            onGoToRoute={onGoToRoute} 
+                            onGoToRoute={(r) => {
+                              onGoToRoute(r);
+                              setIsOpen(false);
+                            }} 
                             removeRoute={removeRoute} 
                           />
                         ))
@@ -479,11 +501,14 @@ export default function Sidebar({ appState, setAppState, onToggleRecording, onAd
                         ].map((mode) => (
                           <button
                             key={mode.id}
-                            onClick={() => setAppState(prev => ({ 
-                              ...prev, 
-                              measurementMode: prev.measurementMode === mode.id ? 'off' : mode.id as any, 
-                              measurementPoints: [] 
-                            }))}
+                            onClick={() => {
+                              setAppState(prev => ({ 
+                                ...prev, 
+                                measurementMode: prev.measurementMode === mode.id ? 'off' : mode.id as any, 
+                                measurementPoints: [] 
+                              }));
+                              setIsOpen(false);
+                            }}
                             className={cn(
                               "p-3 rounded-xl border flex flex-col items-center gap-2 transition-all",
                               appState.measurementMode === mode.id 
@@ -611,7 +636,10 @@ export default function Sidebar({ appState, setAppState, onToggleRecording, onAd
                                 </div>
                                 <div className="flex items-center gap-1">
                                   <button 
-                                    onClick={() => onGoToMap(map)}
+                                    onClick={() => {
+                                      onGoToMap(map);
+                                      setIsOpen(false);
+                                    }}
                                     className="p-1 px-2 bg-blue-500/10 text-blue-400 text-[10px] font-bold uppercase rounded-lg border border-blue-500/20 hover:bg-blue-500 hover:text-white transition-all"
                                   >
                                     Ir
