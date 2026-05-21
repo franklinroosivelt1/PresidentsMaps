@@ -22,6 +22,7 @@ export default defineConfig(({ mode }) => {
         },
         workbox: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+          maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/tile\.openstreetmap\.org\/.*/i,
@@ -57,6 +58,38 @@ export default defineConfig(({ mode }) => {
     ],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+    },
+    build: {
+      target: 'esnext',
+      minify: 'esbuild',
+      cssMinify: true,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules')) {
+              if (
+                id.includes('react') ||
+                id.includes('react-dom') ||
+                id.includes('scheduler') ||
+                id.includes('motion')
+              ) {
+                return 'vendor-react-core';
+              }
+              if (id.includes('maplibre-gl')) {
+                return 'vendor-maplibre';
+              }
+              if (id.includes('@turf')) {
+                return 'vendor-turf';
+              }
+              if (id.includes('pdfjs-dist')) {
+                return 'vendor-pdf';
+              }
+              return 'vendor-libs';
+            }
+          }
+        }
+      },
+      chunkSizeWarningLimit: 1200,
     },
     resolve: {
       alias: {

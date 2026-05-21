@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import MapView from './components/MapView';
+const MapView = React.lazy(() => import('./components/MapView'));
 import Sidebar from './components/Sidebar';
 import CoordinatePanel from './components/CoordinatePanel';
 import POIDialog from './components/POIDialog';
@@ -177,23 +177,30 @@ export default function App() {
 
   return (
     <div className="relative w-full h-[100dvh] bg-zinc-950 overflow-hidden">
-      <MapView 
-        userLocation={userLocation}
-        targetCenter={navigationTarget}
-        pois={appState.pois} 
-        importedMaps={appState.importedMaps}
-        activeLayer={appState.activeLayer}
-        currentRoute={appState.currentRoute}
-        onCenterChange={(lat, lng) => setDisplayCenter({ lat, lng })}
-        onMapClick={handleMapClick}
-        onAddPOI={savePOI}
-        measurementMode={appState.measurementMode}
-        measurementPoints={appState.measurementPoints}
-        onAddMeasurementPoint={handleAddMeasurementPoint}
-        activeAddPoint={activeAddPoint}
-        tempPoint={tempPoint}
-        appState={appState}
-      />
+      <React.Suspense fallback={
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950 text-zinc-450 gap-3 z-10 font-sans">
+          <div className="w-8 h-8 rounded-full border-2 border-zinc-800 border-t-emerald-500 animate-spin"></div>
+          <span className="text-xs font-semibold uppercase tracking-widest text-zinc-500">Abertura Segura do Mapa...</span>
+        </div>
+      }>
+        <MapView 
+          userLocation={userLocation}
+          targetCenter={navigationTarget}
+          pois={appState.pois} 
+          importedMaps={appState.importedMaps}
+          activeLayer={appState.activeLayer}
+          currentRoute={appState.currentRoute}
+          onCenterChange={(lat, lng) => setDisplayCenter({ lat, lng })}
+          onMapClick={handleMapClick}
+          onAddPOI={savePOI}
+          measurementMode={appState.measurementMode}
+          measurementPoints={appState.measurementPoints}
+          onAddMeasurementPoint={handleAddMeasurementPoint}
+          activeAddPoint={activeAddPoint}
+          tempPoint={tempPoint}
+          appState={appState}
+        />
+      </React.Suspense>
       
       <Sidebar 
         appState={appState} 

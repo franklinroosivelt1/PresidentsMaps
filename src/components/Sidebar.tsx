@@ -32,7 +32,7 @@ interface POIItemProps {
   key?: string | number;
 }
 
-function POIItem({ poi, onGoToPOI, onEditPOI, setAppState, removePOI }: POIItemProps) {
+const POIItem = React.memo(function POIItem({ poi, onGoToPOI, onEditPOI, setAppState, removePOI }: POIItemProps) {
   const [showMenu, setShowMenu] = useState(false);
   
   return (
@@ -108,7 +108,7 @@ function POIItem({ poi, onGoToPOI, onEditPOI, setAppState, removePOI }: POIItemP
       </AnimatePresence>
     </div>
   );
-}
+});
 
 interface RouteItemProps {
   route: SavedRoute;
@@ -117,7 +117,7 @@ interface RouteItemProps {
   key?: string | number;
 }
 
-function RouteItem({ route, onGoToRoute, removeRoute }: RouteItemProps) {
+const RouteItem = React.memo(function RouteItem({ route, onGoToRoute, removeRoute }: RouteItemProps) {
   const [showMenu, setShowMenu] = useState(false);
   
   return (
@@ -176,7 +176,7 @@ function RouteItem({ route, onGoToRoute, removeRoute }: RouteItemProps) {
       </AnimatePresence>
     </div>
   );
-}
+});
 
 export default function Sidebar({ appState, setAppState, onToggleRecording, onAddPoint, onGoToPOI, onGoToMap, onEditPOI, onGoToRoute }: SidebarProps) {
   const [isOpen, setIsOpen] = useState(false);
