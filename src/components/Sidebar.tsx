@@ -213,13 +213,32 @@ export default function Sidebar({ appState, setAppState, onToggleRecording, onAd
           bounds: result.bounds,
           visible: true
         };
+        
+        const extractedPois = result.targets || [];
+        const hasTargets = extractedPois.length > 0;
+        
         setAppState(prev => ({ 
           ...prev, 
           importedMaps: [...prev.importedMaps, newMap],
+          pois: [...prev.pois, ...extractedPois],
           lastCenter: { lat: result.bounds[0][0], lng: result.bounds[0][1] }
         }));
+        
         onGoToMap(newMap);
-        alert(`Mapa "${file.name}" importado com sucesso!`);
+        
+        if (hasTargets) {
+          const pointsCount = extractedPois.filter(p => p.type === 'point').length;
+          const areasCount = extractedPois.filter(p => p.type === 'area').length;
+          alert(
+            `Mapa "${file.name}" importado com sucesso!\n\n` +
+            `🔍 Detecção de Atributos via IA e Crawler:\n` +
+            `• Identificamos ${extractedPois.length} alvos com dados de coordenadas/área impressos no PDF!\n` +
+            `• Adicionados: ${pointsCount} pontos de centros e ${areasCount} polígonos/contornos de alvos.\n\n` +
+            `Seus alvos já estão plotados e rotulados em amarelo no mapa!`
+          );
+        } else {
+          alert(`Mapa "${file.name}" importado com sucesso!\n\nNota: Não foram identificadas tabelas de coordenadas impressas no texto deste PDF.`);
+        }
       } catch (err: any) {
         console.error("Falha ao importar mapa:", err);
         alert(`Erro ao importar PDF: ${err.message || 'Verifique o arquivo ou tente outro.'}`);

@@ -228,6 +228,20 @@ const MapView = ({
             [ne[1], sw[0]], // br
             [sw[1], sw[0]]  // bl
           ];
+          
+          // Validate coordinates to prevent map display collapse / WebGL crash on NaN or out-of-bounds values
+          const isValid = coords && coords.every((pt: any) => 
+            Array.isArray(pt) && 
+            pt.length === 2 && 
+            typeof pt[0] === 'number' && !isNaN(pt[0]) && isFinite(pt[0]) && pt[0] >= -180 && pt[0] <= 180 &&
+            typeof pt[1] === 'number' && !isNaN(pt[1]) && isFinite(pt[1]) && pt[1] >= -90 && pt[1] <= 90
+          );
+
+          if (!isValid) {
+            console.error(`Ignoring map overlay map-${m.id} due to invalid/corrupt coordinates:`, coords);
+            return;
+          }
+
           map.current?.addSource(`map-${m.id}`, {
             type: 'image',
             url: m.url,
@@ -350,6 +364,20 @@ const MapView = ({
             [ne[1], sw[0]], // br
             [sw[1], sw[0]]  // bl
           ];
+
+          // Validate coordinates to prevent map display collapse / WebGL crash on NaN or out-of-bounds values
+          const isValid = coords && coords.every((pt: any) => 
+            Array.isArray(pt) && 
+            pt.length === 2 && 
+            typeof pt[0] === 'number' && !isNaN(pt[0]) && isFinite(pt[0]) && pt[0] >= -180 && pt[0] <= 180 &&
+            typeof pt[1] === 'number' && !isNaN(pt[1]) && isFinite(pt[1]) && pt[1] >= -90 && pt[1] <= 90
+          );
+
+          if (!isValid) {
+            console.error(`Ignoring map overlay map-${m.id} due to invalid/corrupt coordinates during reactive refresh:`, coords);
+            return;
+          }
+
           map.current?.addSource(sourceId, {
             type: 'image',
             url: m.url,
