@@ -29,21 +29,21 @@ export default function ManualPointOverlay({
   const [activeTab, setActiveTab] = useState<TabType>('DMS');
 
   // DMS States
-  const [latDeg, setLatDeg] = useState(0);
-  const [latMin, setLatMin] = useState(0);
-  const [latSec, setLatSec] = useState(0);
+  const [latDeg, setLatDeg] = useState<number | ''>(0);
+  const [latMin, setLatMin] = useState<number | ''>(0);
+  const [latSec, setLatSec] = useState<number | ''>(0);
   const [latDir, setLatDir] = useState<'N' | 'S'>('S');
 
-  const [lngDeg, setLngDeg] = useState(0);
-  const [lngMin, setLngMin] = useState(0);
-  const [lngSec, setLngSec] = useState(0);
+  const [lngDeg, setLngDeg] = useState<number | ''>(0);
+  const [lngMin, setLngMin] = useState<number | ''>(0);
+  const [lngSec, setLngSec] = useState<number | ''>(0);
   const [lngDir, setLngDir] = useState<'E' | 'W'>('W');
 
   // UTM States
-  const [utmZoneNum, setUtmZoneNum] = useState(23);
+  const [utmZoneNum, setUtmZoneNum] = useState<number | ''>(23);
   const [utmZoneLet, setUtmZoneLet] = useState('K');
-  const [utmEasting, setUtmEasting] = useState(0);
-  const [utmNorthing, setUtmNorthing] = useState(0);
+  const [utmEasting, setUtmEasting] = useState<number | ''>(0);
+  const [utmNorthing, setUtmNorthing] = useState<number | ''>(0);
 
   // Decimal States
   const [decLat, setDecLat] = useState('');
@@ -52,8 +52,21 @@ export default function ManualPointOverlay({
   // Flag to prevent recursive updates
   const [isUpdatingFromMap, setIsUpdatingFromMap] = useState(false);
 
+  // Keep track of the coordinates we just sent to prevent recursive resetting while typing
+  const lastSentCoordsRef = React.useRef<{ lat: number; lng: number } | null>(null);
+
   // Sync state from Map click (i.e. props change)
   useEffect(() => {
+    if (lastSentCoordsRef.current) {
+      const { lat: lastLat, lng: lastLng } = lastSentCoordsRef.current;
+      const diffLat = Math.abs(lat - lastLat);
+      const diffLng = Math.abs(lng - lastLng);
+      // If props changed but they match what we just sent (with high tolerance), do not overwrite local inputs
+      if (diffLat < 0.000001 && diffLng < 0.000001) {
+        return;
+      }
+    }
+
     setIsUpdatingFromMap(true);
     
     // Update DMS
@@ -85,24 +98,35 @@ export default function ManualPointOverlay({
 
   // Handle manual input change for DMS
   const handleDmsChange = (
-    lDeg: number, lMin: number, lSec: number, lDir: 'N' | 'S',
-    gDeg: number, gMin: number, gSec: number, gDir: 'E' | 'W'
+    lDeg: number | '', lMin: number | '', lSec: number | '', lDir: 'N' | 'S',
+    gDeg: number | '', gMin: number | '', gSec: number | '', gDir: 'E' | 'W'
   ) => {
     if (isUpdatingFromMap) return;
-    const newLat = dmsToDecimal(lDeg, lMin, lSec, lDir);
-    const newLng = dmsToDecimal(gDeg, gMin, gSec, gDir);
+    const cleanLDeg = Number(lDeg) || 0;
+    const cleanLMin = Number(lMin) || 0;
+    const cleanLSec = Number(lSec) || 0;
+    const cleanGDeg = Number(gDeg) || 0;
+    const cleanGMin = Number(gMin) || 0;
+    const cleanGSec = Number(gSec) || 0;
+    const newLat = dmsToDecimal(cleanLDeg, cleanLMin, cleanLSec, lDir);
+    const newLng = dmsToDecimal(cleanGDeg, cleanGMin, cleanGSec, gDir);
     if (!isNaN(newLat) && !isNaN(newLng)) {
+      lastSentCoordsRef.current = { lat: newLat, lng: newLng };
       onCoordinatesChange(newLat, newLng);
     }
   };
 
   // Handle manual input change for UTM
   const handleUtmChange = (
-    easting: number, northing: number, zoneNum: number, zoneLet: string
+    easting: number | '', northing: number | '', zoneNum: number | '', zoneLet: string
   ) => {
     if (isUpdatingFromMap) return;
-    const converted = utmToLatLng(easting, northing, zoneNum, zoneLet);
+    const cleanEasting = Number(easting) || 0;
+    const cleanNorthing = Number(northing) || 0;
+    const cleanZoneNum = Number(zoneNum) || 23;
+    const converted = utmToLatLng(cleanEasting, cleanNorthing, cleanZoneNum, zoneLet);
     if (converted) {
+      lastSentCoordsRef.current = { lat: converted.lat, lng: converted.lng };
       onCoordinatesChange(converted.lat, converted.lng);
     }
   };
@@ -110,9 +134,12 @@ export default function ManualPointOverlay({
   // Handle manual input change for Decimal
   const handleDecChange = (flat: string, flng: string) => {
     if (isUpdatingFromMap) return;
-    const nLat = parseFloat(flat);
-    const nLng = parseFloat(flng);
+    const cleanLat = flat.replace(',', '.');
+    const cleanLng = flng.replace(',', '.');
+    const nLat = parseFloat(cleanLat);
+    const nLng = parseFloat(cleanLng);
     if (!isNaN(nLat) && !isNaN(nLng)) {
+      lastSentCoordsRef.current = { lat: nLat, lng: nLng };
       onCoordinatesChange(nLat, nLng);
     }
   };
@@ -210,7 +237,9 @@ export default function ManualPointOverlay({
                     type="number"
                     value={latDeg}
                     onChange={(e) => {
-                      const v = Math.min(90, Math.max(0, parseInt(e.target.value) || 0));
+                      const raw = e.target.value;
+                      const parsed = parseInt(raw);
+                      const v = raw === '' ? '' : (isNaN(parsed) ? 0 : Math.min(90, Math.max(0, parsed)));
                       setLatDeg(v);
                       handleDmsChange(v, latMin, latSec, latDir, lngDeg, lngMin, lngSec, lngDir);
                     }}
@@ -224,7 +253,9 @@ export default function ManualPointOverlay({
                     type="number"
                     value={latMin}
                     onChange={(e) => {
-                      const v = Math.min(59, Math.max(0, parseInt(e.target.value) || 0));
+                      const raw = e.target.value;
+                      const parsed = parseInt(raw);
+                      const v = raw === '' ? '' : (isNaN(parsed) ? 0 : Math.min(59, Math.max(0, parsed)));
                       setLatMin(v);
                       handleDmsChange(latDeg, v, latSec, latDir, lngDeg, lngMin, lngSec, lngDir);
                     }}
@@ -239,7 +270,9 @@ export default function ManualPointOverlay({
                     step="0.01"
                     value={latSec}
                     onChange={(e) => {
-                      const v = Math.min(59.99, Math.max(0, parseFloat(e.target.value) || 0));
+                      const raw = e.target.value;
+                      const parsed = parseFloat(raw.replace(',', '.'));
+                      const v = raw === '' ? '' : (isNaN(parsed) ? 0 : Math.min(59.99, Math.max(0, parsed)));
                       setLatSec(v);
                       handleDmsChange(latDeg, latMin, v, latDir, lngDeg, lngMin, lngSec, lngDir);
                     }}
@@ -275,7 +308,9 @@ export default function ManualPointOverlay({
                     type="number"
                     value={lngDeg}
                     onChange={(e) => {
-                      const v = Math.min(180, Math.max(0, parseInt(e.target.value) || 0));
+                      const raw = e.target.value;
+                      const parsed = parseInt(raw);
+                      const v = raw === '' ? '' : (isNaN(parsed) ? 0 : Math.min(180, Math.max(0, parsed)));
                       setLngDeg(v);
                       handleDmsChange(latDeg, latMin, latSec, latDir, v, lngMin, lngSec, lngDir);
                     }}
@@ -289,7 +324,9 @@ export default function ManualPointOverlay({
                     type="number"
                     value={lngMin}
                     onChange={(e) => {
-                      const v = Math.min(59, Math.max(0, parseInt(e.target.value) || 0));
+                      const raw = e.target.value;
+                      const parsed = parseInt(raw);
+                      const v = raw === '' ? '' : (isNaN(parsed) ? 0 : Math.min(59, Math.max(0, parsed)));
                       setLngMin(v);
                       handleDmsChange(latDeg, latMin, latSec, latDir, lngDeg, v, lngSec, lngDir);
                     }}
@@ -304,7 +341,9 @@ export default function ManualPointOverlay({
                     step="0.01"
                     value={lngSec}
                     onChange={(e) => {
-                      const v = Math.min(59.99, Math.max(0, parseFloat(e.target.value) || 0));
+                      const raw = e.target.value;
+                      const parsed = parseFloat(raw.replace(',', '.'));
+                      const v = raw === '' ? '' : (isNaN(parsed) ? 0 : Math.min(59.99, Math.max(0, parsed)));
                       setLngSec(v);
                       handleDmsChange(latDeg, latMin, latSec, latDir, lngDeg, lngMin, v, lngDir);
                     }}
@@ -341,7 +380,9 @@ export default function ManualPointOverlay({
                 type="number"
                 value={utmZoneNum}
                 onChange={(e) => {
-                  const v = Math.min(60, Math.max(1, parseInt(e.target.value) || 1));
+                  const raw = e.target.value;
+                  const parsed = parseInt(raw);
+                  const v = raw === '' ? '' : (isNaN(parsed) ? 1 : Math.min(60, Math.max(1, parsed)));
                   setUtmZoneNum(v);
                   handleUtmChange(utmEasting, utmNorthing, v, utmZoneLet);
                 }}
@@ -371,7 +412,9 @@ export default function ManualPointOverlay({
                   type="number"
                   value={utmEasting}
                   onChange={(e) => {
-                    const v = parseInt(e.target.value) || 0;
+                    const raw = e.target.value;
+                    const parsed = parseInt(raw);
+                    const v = raw === '' ? '' : (isNaN(parsed) ? 0 : parsed);
                     setUtmEasting(v);
                     handleUtmChange(v, utmNorthing, utmZoneNum, utmZoneLet);
                   }}
@@ -385,7 +428,9 @@ export default function ManualPointOverlay({
                   type="number"
                   value={utmNorthing}
                   onChange={(e) => {
-                    const v = parseInt(e.target.value) || 0;
+                    const raw = e.target.value;
+                    const parsed = parseInt(raw);
+                    const v = raw === '' ? '' : (isNaN(parsed) ? 0 : parsed);
                     setUtmNorthing(v);
                     handleUtmChange(utmEasting, v, utmZoneNum, utmZoneLet);
                   }}
