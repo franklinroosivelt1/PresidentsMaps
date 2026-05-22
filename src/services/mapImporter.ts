@@ -92,10 +92,19 @@ function linearRegression(points: { key: number; val: number }[]) {
 
 function parseDMSToDecimal(str: string): number | null {
   // Normalize commas to points
-  const clean = str.replace(/,/g, '.').trim();
+  let clean = str.replace(/,/g, '.').trim();
   
-  // Matches DMS like: 8°50'25.3"S, -69°30'36,000", -8°49'12", 9°36'00"
-  const dmsMatch = clean.match(/(-?\d+(?:\.\d+)?)\s*°\s*(?:(\d+(?:\.\d+)?)\s*'\s*(?:(\d+(?:\.\d+)?)\s*["”]?)?)?\s*([NSWEOO])?/i);
+  // Replace alternative symbols for degrees with standard °
+  clean = clean.replace(/[ººoOª•*·\^]/g, '°');
+  // Replace curly or double single quotes with "
+  clean = clean.replace(/['’`´]{2}/g, '"');
+  clean = clean.replace(/''/g, '"');
+  clean = clean.replace(/[”"“«»]/g, '"');
+  // Normalize minutes symbols
+  clean = clean.replace(/['’`´]/g, "'");
+
+  // Matches DMS like: 8°50'25.3"S, -69°30'36"
+  const dmsMatch = clean.match(/(-?\d+(?:\.\d+)?)\s*°?\s*(?:(\d+(?:\.\d+)?)\s*['\s]\s*(?:(\d+(?:\.\d+)?)\s*["\s]?)?)?\s*([NSWEOO])?/i);
   if (!dmsMatch) return null;
   
   const degVal = parseFloat(dmsMatch[1]);
@@ -118,6 +127,25 @@ function parseDMSToDecimal(str: string): number | null {
     }
   }
   return val;
+}
+
+function isLikelyCoordinateString(str: string): boolean {
+  const clean = str.trim();
+  if (clean.includes('°') || clean.includes('º') || clean.includes('\'') || clean.includes('"') || /[SWEO]$/i.test(clean)) {
+    return true;
+  }
+  
+  const parsed = parseFloat(clean.replace(',', '.'));
+  if (!isNaN(parsed)) {
+    // Broad coordinate ranges in Acre, Brazil:
+    // Longitude ~ [-76, -64] or [64, 76]
+    if (parsed <= -64 && parsed >= -76) return true;
+    if (parsed >= 64 && parsed <= 76) return true;
+    // Latitude ~ [-12, -6] or [6, 12]
+    if (parsed <= -6 && parsed >= -12) return true;
+    if (parsed >= 6 && parsed <= 12) return true;
+  }
+  return false;
 }
 
 function fitRobustLine(points: { key: number; val: number }[]) {
@@ -179,7 +207,7 @@ async function extractCoordsFromText(
       if (!item.str || !item.transform) continue;
       const str = item.str.trim();
       
-      if (str.includes('°')) {
+      if (isLikelyCoordinateString(str)) {
         const val = parseDMSToDecimal(str);
         if (val !== null && !isNaN(val)) {
           const x = item.transform[4];
@@ -597,6 +625,11 @@ async function extractTableTargets(page: any): Promise<POI[]> {
       for (const cellRaw of row) {
         const cell = cellRaw.trim();
         if (!cell) continue;
+        
+        if (!isLikelyCoordinateString(cell)) {
+          otherCells.push(cell);
+          continue;
+        }
         
         // Try parsing as DMS or float decimal
         let val = parseDMSToDecimal(cell);
