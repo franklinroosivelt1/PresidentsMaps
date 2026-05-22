@@ -12,6 +12,8 @@ import { processGeoPDF } from '../services/mapImporter';
 import { parseKMLToGeoJSON } from '../services/kmlParser';
 import * as turf from '@turf/turf';
 
+import { decimalToDMS } from '../lib/coordinates';
+
 interface SidebarProps {
   appState: AppState;
   setAppState: React.Dispatch<React.SetStateAction<AppState>>;
@@ -46,6 +48,11 @@ interface POIItemProps {
 
 const POIItem = React.memo(function POIItem({ poi, onGoToPOI, onEditPOI, setAppState, removePOI }: POIItemProps) {
   const [showMenu, setShowMenu] = useState(false);
+
+  const dmsLat = decimalToDMS(poi.lat, true);
+  const dmsLng = decimalToDMS(poi.lng, false);
+  const latStr = `${dmsLat.degrees}° ${dmsLat.minutes}' ${dmsLat.seconds.toFixed(0)}" ${dmsLat.direction}`;
+  const lngStr = `${dmsLng.degrees}° ${dmsLng.minutes}' ${dmsLng.seconds.toFixed(0)}" ${dmsLng.direction}`;
 
   const handleShareKML = () => {
     let geometryKML = '';
@@ -192,6 +199,10 @@ const POIItem = React.memo(function POIItem({ poi, onGoToPOI, onEditPOI, setAppS
             {poi.polygonArea ? (
               <div className="text-[10px] text-zinc-500 font-mono mt-0.5 font-bold uppercase">Área: {poi.polygonArea.toFixed(4)} ha</div>
             ) : null}
+            <div className="text-[10px] text-zinc-400 font-mono mt-1 space-y-0.5 border-t border-zinc-800/30 pt-1">
+              <div>Lat: <span className="text-zinc-300">{latStr}</span></div>
+              <div>Long: <span className="text-zinc-300">{lngStr}</span></div>
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-1">
