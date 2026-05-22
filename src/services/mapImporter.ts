@@ -42,7 +42,7 @@ export async function processGeoPDF(file: File): Promise<GeoPDFMetadata> {
     }
 
     // 3. Extract any specific targets, coordinates, and attributes from the text layer
-    const targets = await extractTableTargets(page);
+    let targets = await extractTableTargets(page);
     
     const viewport = page.getViewport({ scale: 1.5 });
     const canvas = document.createElement('canvas');
@@ -60,6 +60,65 @@ export async function processGeoPDF(file: File): Promise<GeoPDFMetadata> {
     }).promise;
     
     const image = canvas.toDataURL('image/jpeg', 0.8);
+
+    // 4. Fallback to Gemini AI Visual Table Extractor if PDF text layer yielded no targets
+    if (targets.length === 0) {
+      console.log("No targets found via PDF text content. Falling back to Gemini AI Visual Extract.");
+      try {
+        const aiResponse = await fetch("/api/parse-map-image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image })
+        });
+        if (aiResponse.ok) {
+          const aiData = await aiResponse.json();
+          if (aiData.targets && aiData.targets.length > 0) {
+            console.log("Successfully extracted targets via Gemini:", aiData.targets);
+            
+            // Map the parsed AI targets to our internal robust POI structure
+            const mappedPois: POI[] = [];
+            let anonymousCounter = 1;
+            
+            for (const item of aiData.targets) {
+              const dmsLat = item.lat_centro_dms;
+              const dmsLng = item.long_centr_dms;
+              const areaVal = parseFloat(String(item.area_ha));
+              
+              const parsedLat = parseDMSToDecimal(dmsLat);
+              const parsedLng = parseDMSToDecimal(dmsLng);
+              
+              if (parsedLat !== null && parsedLng !== null && !isNaN(parsedLat) && !isNaN(parsedLng)) {
+                const id = item.id || `Alvo_${anonymousCounter++}`;
+                const hasArea = areaVal && areaVal > 0;
+                mappedPois.push({
+                  id: crypto.randomUUID(),
+                  name: `Alvo ${id}`,
+                  description: `Área informada: ${hasArea ? areaVal.toFixed(4) + ' ha' : 'Não informada'}\nLatitude (DMS): ${dmsLat}\nLongitude (DMS): ${dmsLng}`,
+                  lat: parsedLat,
+                  lng: parsedLng,
+                  color: '#facc15',
+                  createdAt: Date.now(),
+                  type: hasArea ? 'area' : 'point',
+                  visible: true,
+                  polygonArea: hasArea ? areaVal : undefined,
+                  pdfTargetId: id,
+                  pathPoints: hasArea ? generateCircleVertices(parsedLat, parsedLng, areaVal) : undefined
+                });
+              }
+            }
+            
+            if (mappedPois.length > 0) {
+              targets = mappedPois;
+            }
+          }
+        } else {
+          const errText = await aiResponse.text();
+          console.error("Gemini map-parsing endpoint returned error response:", errText);
+        }
+      } catch (aiErr) {
+        console.error("Failed to fetch from Gemini map-parsing fallback endpoint:", aiErr);
+      }
+    }
     
     return {
       bounds: result?.bounds || [[-9.9, -69.5], [-8.8, -68.4]], 
@@ -734,7 +793,7 @@ async function extractTableTargets(page: any): Promise<POI[]> {
           finalPOIs.push({
             id: crypto.randomUUID(),
             name: id.startsWith('Alvo_') ? `Ponto (${id})` : `Alvo ${id}`,
-            description: `Ponto de interesse extraído do GeoPDF.\nÁrea informada: ${v.potentialArea ? v.potentialArea.toFixed(4) + ' ha' : 'Não informada'}`,
+            description: `Área informada: ${v.potentialArea ? v.potentialArea.toFixed(4) + ' ha' : 'Não informada'}`,
             lat: v.lat,
             lng: v.lng,
             color,

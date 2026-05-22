@@ -628,11 +628,9 @@ const MapView = ({
 
       const dmsLat = decimalToDMS(poi.lat, true);
       const dmsLng = decimalToDMS(poi.lng, false);
-      const utm = latLngToUTM(poi.lat, poi.lng);
 
       const dmsStr = `${dmsLat.degrees}° ${dmsLat.minutes}' ${dmsLat.seconds.toFixed(0)}" ${dmsLat.direction}`;
       const dmsLngStr = `${dmsLng.degrees}° ${dmsLng.minutes}' ${dmsLng.seconds.toFixed(0)}" ${dmsLng.direction}`;
-      const utmStr = `${utm.zoneNumber}${utm.zoneLetter} ${utm.easting}m E ${utm.northing}m N`;
 
       let detailLabel = '';
       if (poi.polygonArea) {
@@ -641,22 +639,18 @@ const MapView = ({
         detailLabel = `<div><b>Distância:</b> ${poi.pathDistance.toFixed(2)} km</div>`;
       }
 
-      let pdfIdLabel = '';
-      if (poi.pdfTargetId) {
-        pdfIdLabel = `<div><b>ID Ponto:</b> ${poi.pdfTargetId}</div>`;
-      }
+      const pointId = poi.pdfTargetId || poi.name.replace(/^Alvo\s+/i, '');
 
       const popupContent = `
-        <div style="font-family: sans-serif; padding: 4px; color: #1e293b; max-width: 225px;">
-          <h3 style="margin: 0 0 2px 0; font-size: 13px; font-weight: bold; color: #0f172a;">${poi.name}</h3>
-          ${poi.description ? `<p style="margin: 0 0 6px 0; font-size: 10px; color: #64748b;">${poi.description}</p>` : ''}
-          <div style="font-family: monospace; font-size: 9px; background-color: #f8fafc; padding: 5px; border-radius: 6px; border: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 2px;">
-            ${pdfIdLabel}
-            ${detailLabel}
-            <div><b>UTM:</b> ${utmStr}</div>
-            <div><b>DMS S:</b> ${dmsStr}</div>
-            <div><b>DMS W:</b> ${dmsLngStr}</div>
-            <div><b>DEC:</b> ${poi.lat.toFixed(6)}, ${poi.lng.toFixed(6)}</div>
+        <div style="font-family: monospace; font-size: 10px; background-color: #f8fafc; padding: 7px; border-radius: 6px; border: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 3.5px; min-width: 165px; color: #1e293b;">
+          <div style="color: #dc2626; font-weight: bold; border-bottom: 1px solid #fee2e2; padding-bottom: 3.5px; margin-bottom: 1.5px; font-size: 10.5px;">
+            <b>ID Ponto:</b> ${pointId}
+          </div>
+          ${detailLabel}
+          <div><b>Lat:</b> ${dmsStr}</div>
+          <div><b>Long:</b> ${dmsLngStr}</div>
+          <div style="font-size: 9px; color: #94a3b8; border-top: 1px dashed #e2e8f0; padding-top: 3.5px; margin-top: 1.5px;">
+            <b>DEC:</b> ${poi.lat.toFixed(6)}, ${poi.lng.toFixed(6)}
           </div>
         </div>
       `;
