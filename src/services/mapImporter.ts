@@ -41,17 +41,90 @@ export async function processGeoPDF(file: File): Promise<GeoPDFMetadata> {
       result = await extractCoordsFromText(page, pageWidth, pageHeight);
     }
 
-    // 3. Extract any specific targets, coordinates, and attributes from the text layer from ALL pages
-    const targets: POI[] = [];
+    // 3. Extract text content from ALL pages to feed into Gemini AI Parser
+    let fullPdfText = "";
     for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
       try {
         const p = await pdf.getPage(pageNum);
-        const pageTargets = await extractTableTargets(p);
-        if (pageTargets && pageTargets.length > 0) {
-          targets.push(...pageTargets);
+        const textContent = await p.getTextContent();
+        const pageText = textContent.items
+          .map((item: any) => item.str || '')
+          .filter(Boolean)
+          .join(" ");
+        fullPdfText += `[PÁGINA ${pageNum}]\n${pageText}\n\n`;
+      } catch (e) {
+        console.error(`Error reading text of page ${pageNum}:`, e);
+      }
+    }
+
+    const targets: POI[] = [];
+
+    // Try Gemini AI Service first to ensure 100% robust extraction on any device/font rendering!
+    let geminiSuccess = false;
+    if (fullPdfText.trim().length > 0) {
+      try {
+        const response = await fetch("/api/parse-map-text", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: fullPdfText })
+        });
+        
+        if (response.ok) {
+          const parsed = await response.json();
+          const geminiTargets = parsed.targets || [];
+          
+          let anonymousCounter = 1;
+          for (const gt of geminiTargets) {
+            const parsedLat = parseDMSToDecimal(gt.lat_centro_dms);
+            const parsedLng = parseDMSToDecimal(gt.long_centr_dms);
+            
+            if (parsedLat !== null && parsedLng !== null && !isNaN(parsedLat) && !isNaN(parsedLng)) {
+              const id = gt.id || `Alvo_${anonymousCounter++}`;
+              const areaVal = gt.area_ha ?? undefined;
+              const hasArea = areaVal !== undefined && areaVal > 0;
+              const color = '#facc15'; // yellow target color
+              
+              targets.push({
+                id: crypto.randomUUID(),
+                name: id.startsWith('Alvo_') ? `Ponto (${id})` : `Alvo ${id}`,
+                description: `Área informada: ${areaVal ? areaVal.toFixed(4) + ' ha' : 'Não informada'}\nCoordenadas: Lat ${parsedLat.toFixed(6)}, Lng ${parsedLng.toFixed(6)}`,
+                lat: parsedLat,
+                lng: parsedLng,
+                color,
+                createdAt: Date.now(),
+                type: hasArea ? 'area' : 'point',
+                visible: true,
+                polygonArea: areaVal,
+                pdfTargetId: id,
+                pathPoints: hasArea ? generateCircleVertices(parsedLat, parsedLng, areaVal) : undefined
+              });
+            }
+          }
+          console.log(`Successfully parsed ${targets.length} targets using Gemini AI text service.`);
+          if (targets.length > 0) {
+            geminiSuccess = true;
+          }
+        } else {
+          console.warn("Gemini map text extraction HTTP status error. Falling back to local parser.", response.status);
         }
-      } catch (pageErr) {
-        console.error(`Error searching page ${pageNum} for targets:`, pageErr);
+      } catch (geminiError) {
+        console.error("Gemini map text extraction failed. Falling back to local parser.", geminiError);
+      }
+    }
+
+    // Fallback: if Gemini failed or found no targets, run local client-side extraction to have full offline safety!
+    if (!geminiSuccess || targets.length === 0) {
+      console.log("Running local table targets parser fallback...");
+      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+        try {
+          const p = await pdf.getPage(pageNum);
+          const pageTargets = await extractTableTargets(p);
+          if (pageTargets && pageTargets.length > 0) {
+            targets.push(...pageTargets);
+          }
+        } catch (pageErr) {
+          console.error(`Error searching page ${pageNum} for targets local fallback:`, pageErr);
+        }
       }
     }
     

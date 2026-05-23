@@ -57,8 +57,8 @@ Extraia individualmente cada uma das linhas da tabela encontrada no mapa.
 Para cada item detectado, capture:
 - id: o identificador exato da coluna id_BPA (ex: "264", "263", "262", "260", etc)
 - area_ha: o valor numérico exato em hectares da área do polígono (ex: 2.758895)
-- lat_centro_dms: a coordenada lat_centro exatamente como consta (ex: "8°50'25.3\\"S")
-- long_centr_dms: a coordenada long_centr exatamente como consta (ex: "69°26'24.1\\"W")
+- lat_centro_dms: a coordenada lat_centro exatamente como consta (ex: "8°50'25.3\"S")
+- long_centr_dms: a coordenada long_centr exatamente como consta (ex: "69°26'24.1\"W")
 
 Mapeie-os e retorne estritamente um JSON estruturado seguindo o modelo. Se houver múltiplos alvos listados na tabela, retorne todos eles.`;
 
@@ -105,6 +105,73 @@ Mapeie-os e retorne estritamente um JSON estruturado seguindo o modelo. Se houve
     } catch (error: any) {
       console.error("Error in server map-parser endpoint:", error);
       return res.status(500).json({ error: error.message || "Interpretação via IA falhou, tente novamente." });
+    }
+  });
+
+  // API Route: Gemini map text layer semantic extraction (QGIS PDF standard)
+  app.post("/api/parse-map-text", async (req, res) => {
+    try {
+      const { text } = req.body;
+      if (!text) {
+        return res.status(400).json({ error: "Nenhum texto do mapa foi fornecido." });
+      }
+
+      if (!process.env.GEMINI_API_KEY) {
+        console.warn("GEMINI_API_KEY environment variable is not defined");
+        return res.status(500).json({ error: "Chave API do Gemini não configurada nos segredos." });
+      }
+
+      const prompt = `Você é um leitor especialista em relatórios e mapas georreferenciados gerados no QGIS para o Acre, Brasil.
+Dada a lista de textos de um arquivo PDF de mapa do QGIS, identifique e extraia todos os pontos ou alvos de monitoramento ambiental com as respectivas coordenadas e áreas.
+
+Analise cuidadosamente todo o texto extraído do mapa:
+---
+${text}
+---
+
+Extraia cada alvo de monitoramento/ponto de interesse individualmente.
+Cada registro na tabela costuma ter:
+- Um identificador numérico ou texto (ex: "255", "261", "259", "254", etc) que representa o ponto/lote/alvo.
+- Área em hectares (ex: 12.2996 ou similar, se houver).
+- Par de coordenadas, que podem estar formatadas como DMS (ex: "9°13'25.51\\"S", "68°52'46.71\\"W") ou decimais (ex: -9.3245, -68.9512).
+
+Retorne estritamente um JSON estruturado seguindo o modelo abaixo. Adicione apenas os alvos identificados com coordenadas válidas.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              targets: {
+                type: Type.ARRAY,
+                description: "Lista de alvos de monitoramento ambiental identificados",
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    id: { type: Type.STRING, description: "Código d_BPA da tabela ou número/ID do alvo" },
+                    area_ha: { type: Type.NUMBER, description: "Área em hectares se existente na tabela, ou null se não houver" },
+                    lat_centro_dms: { type: Type.STRING, description: "Latitude no formato DMS original ou Decimal original" },
+                    long_centr_dms: { type: Type.STRING, description: "Longitude no formato DMS original ou Decimal original" }
+                  },
+                  required: ["id", "lat_centro_dms", "long_centr_dms"]
+                }
+              }
+            },
+            required: ["targets"]
+          }
+        }
+      });
+
+      const responseText = response.text || "{}";
+      const parsedData = JSON.parse(responseText.trim());
+      console.log(`Success: Extracted ${parsedData.targets?.length || 0} targets via Gemini Text parser`);
+      return res.json(parsedData);
+    } catch (error: any) {
+      console.error("Error in server map-parser text endpoint:", error);
+      return res.status(500).json({ error: error.message || "Interpretação de texto via IA falhou." });
     }
   });
 
