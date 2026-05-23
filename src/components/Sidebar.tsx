@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { 
   Menu, X, Map as MapIcon, Layers, MapPin, 
   Settings, Download, Activity, Ruler, Trash2, 
-  ChevronRight, Save, Share2, LocateFixed, Eye, EyeOff, Pencil
+  ChevronRight, ChevronDown, Globe, Save, Share2, LocateFixed, Eye, EyeOff, Pencil
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
@@ -495,6 +495,10 @@ export default function Sidebar({ appState, setAppState, onToggleRecording, onAd
     }));
   };
 
+  const [isInternetLayersExpanded, setIsInternetLayersExpanded] = useState(true);
+  const [isGeoPdfExpanded, setIsGeoPdfExpanded] = useState(false);
+  const [isKmlExpanded, setIsKmlExpanded] = useState(false);
+
   const layers: { id: MapLayer; name: string; description: string }[] = [
     { id: 'google-satellite', name: 'Google Satélite', description: 'Imagens de satélite puras' },
     { id: 'google-hybrid', name: 'Google Híbrido', description: 'Satélite com nomes de ruas e estradas' },
@@ -667,65 +671,277 @@ export default function Sidebar({ appState, setAppState, onToggleRecording, onAd
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 {activeTab === 'layers' && (
                   <div className="space-y-6">
-                    <section>
-                      <div className="flex items-center justify-between mb-3 px-1">
-                        <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Importadas (KML)</h3>
-                        <label className="p-1.5 bg-zinc-900 border border-zinc-800 rounded-lg hover:bg-zinc-800 cursor-pointer transition-colors">
-                          <MapIcon className="w-4 h-4 text-blue-500" />
-                          <input type="file" accept=".kml" className="hidden" onChange={handleKmlImport} />
-                        </label>
-                      </div>
-                      <div className="space-y-2">
-                        {appState.importedKmls.length === 0 ? (
-                          <p className="text-[10px] text-zinc-600 text-center py-4 italic">Nenhuma camada importada.</p>
-                        ) : (
-                          appState.importedKmls.map(kml => (
-                            <div key={kml.id} className="flex items-center justify-between p-2 bg-zinc-900/50 border border-zinc-800 rounded-lg">
-                              <span className="text-xs font-medium text-zinc-300 truncate max-w-[150px]">{kml.name}</span>
-                              <div className="flex items-center gap-1">
-                                <button 
-                                  onClick={() => setAppState(prev => ({
-                                    ...prev,
-                                    importedKmls: prev.importedKmls.map(k => k.id === kml.id ? { ...k, visible: !k.visible } : k)
-                                  }))}
-                                  className={cn("p-1.5", kml.visible ? "text-blue-500" : "text-zinc-600")}
-                                >
-                                  {kml.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                                </button>
-                                <button onClick={() => removeImportedKml(kml.id)} className="p-1.5 text-zinc-600 hover:text-red-500">
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
+                    <section className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsInternetLayersExpanded(prev => !prev)}
+                        className="w-full flex items-center justify-between p-4 bg-zinc-900 border border-zinc-800 rounded-xl hover:border-zinc-700 hover:bg-zinc-900/80 transition-all text-left cursor-pointer"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="p-2 rounded-xl bg-blue-500/10 text-blue-400">
+                            <Globe className="w-5 h-5" />
+                          </span>
+                          <div>
+                            <div className="text-[10px] font-bold text-zinc-100 uppercase tracking-wider">Mapas da Internet</div>
+                            <div className="text-[9px] text-zinc-400 mt-0.5">
+                              Ativo: <span className="text-blue-400 font-semibold">{layers.find(l => l.id === appState.activeLayer)?.name || 'Nenhum'}</span>
                             </div>
-                          ))
+                          </div>
+                        </div>
+                        <div>
+                          {isInternetLayersExpanded ? (
+                            <ChevronDown className="w-4 h-4 text-zinc-500" />
+                          ) : (
+                            <ChevronRight className="w-4 h-4 text-zinc-500" />
+                          )}
+                        </div>
+                      </button>
+
+                      <AnimatePresence initial={false}>
+                        {isInternetLayersExpanded && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.15 }}
+                            className="overflow-hidden"
+                          >
+                            <div className="pl-3 border-l border-zinc-800/80 ml-5 mt-1.5 space-y-2">
+                              {layers.map((layer) => (
+                                <button
+                                  key={layer.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setAppState(prev => ({ ...prev, activeLayer: layer.id }));
+                                    setIsOpen(false);
+                                  }}
+                                  className={cn(
+                                    "w-full p-3 rounded-xl border text-left transition-all flex items-center justify-between cursor-pointer",
+                                    appState.activeLayer === layer.id 
+                                      ? "bg-blue-600/10 border-blue-600/50 text-blue-400 font-semibold" 
+                                      : "bg-zinc-900/50 border-zinc-800/80 text-zinc-400 hover:border-zinc-750 hover:bg-zinc-900/80"
+                                  )}
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    <div className="text-xs font-bold">{layer.name}</div>
+                                    <div className="text-[10px] text-zinc-500 mt-0.5 font-normal truncate">{layer.description}</div>
+                                  </div>
+                                  <div className="flex-shrink-0 ml-3">
+                                    <div className={cn(
+                                      "w-4 h-4 rounded-full border flex items-center justify-center transition-all",
+                                      appState.activeLayer === layer.id
+                                        ? "border-blue-500 bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.4)]"
+                                        : "border-zinc-700"
+                                    )}>
+                                      {appState.activeLayer === layer.id && (
+                                        <div className="w-1.5 h-1.5 rounded-full bg-zinc-950" />
+                                      )}
+                                    </div>
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          </motion.div>
                         )}
-                      </div>
+                      </AnimatePresence>
                     </section>
 
-                    <section>
-                      <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-3 px-1">Da Internet</h3>
-                      <div className="space-y-2">
-                        {layers.map((layer) => (
-                          <button
-                            key={layer.id}
-                            onClick={() => {
-                              setAppState(prev => ({ ...prev, activeLayer: layer.id }));
-                              setIsOpen(false);
-                            }}
-                            className={cn(
-                              "w-full p-3 rounded-xl border text-left transition-all",
-                              appState.activeLayer === layer.id 
-                                ? "bg-blue-600/10 border-blue-600/50 text-blue-400" 
-                                : "bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:border-zinc-700"
-                            )}
-                          >
-                            <div className="flex items-center justify-between mb-1">
-                              <span className="font-semibold text-sm">{layer.name}</span>
-                              {appState.activeLayer === layer.id && <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)]" />}
+                    <section className="border-t border-zinc-800/60 pt-4 space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsGeoPdfExpanded(prev => !prev)}
+                        className="w-full flex items-center justify-between p-4 bg-zinc-900 border border-zinc-800 rounded-xl hover:border-zinc-700 hover:bg-zinc-900/80 transition-all text-left cursor-pointer"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="p-2 rounded-xl bg-blue-500/10 text-blue-400">
+                            <MapIcon className="w-5 h-5" />
+                          </span>
+                          <div>
+                            <div className="text-[10px] font-bold text-zinc-100 uppercase tracking-wider">Mapas Georreferenciados</div>
+                            <div className="text-[9px] text-zinc-400 mt-0.5 animate-pulse">
+                              {appState.importedMaps.length > 0 ? (
+                                <span className="text-blue-400 font-semibold">{appState.importedMaps.length} mapa(s) ativo(s)</span>
+                              ) : (
+                                "Importar GeoPDF do QGIS"
+                              )}
                             </div>
-                          </button>
-                        ))}
-                      </div>
+                          </div>
+                        </div>
+                        <div>
+                          {isGeoPdfExpanded ? (
+                            <ChevronDown className="w-4 h-4 text-zinc-500" />
+                          ) : (
+                            <ChevronRight className="w-4 h-4 text-zinc-500" />
+                          )}
+                        </div>
+                      </button>
+
+                      <AnimatePresence initial={false}>
+                        {isGeoPdfExpanded && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.15 }}
+                            className="overflow-hidden"
+                          >
+                            <div className="pl-3 border-l border-zinc-800/80 ml-5 mt-1.5 space-y-3">
+                              <label className="w-full flex items-center justify-center gap-2.5 p-3.5 bg-zinc-900/40 border border-zinc-800/80 border-dashed rounded-xl font-bold uppercase tracking-widest text-[9px] hover:border-zinc-650 hover:bg-zinc-900/60 transition-all text-blue-500 cursor-pointer">
+                                <Download className="w-4 h-4 flex-shrink-0" />
+                                Escolher mapa GeoPDF
+                                <input type="file" accept=".pdf" className="hidden" onChange={handleFileUpload} />
+                              </label>
+
+                              {appState.importedMaps.length > 0 ? (
+                                <div className="space-y-2">
+                                  {appState.importedMaps.map((map) => (
+                                    <div key={map.id} className="bg-zinc-900/30 border border-zinc-800/60 rounded-xl p-2.5 flex items-center justify-between gap-3">
+                                      <div className="flex-1 min-w-0">
+                                        <div className="text-[10px] font-bold text-white truncate">{map.name}</div>
+                                        <div className="text-[8px] text-zinc-500 truncate">Sincronizado via QGIS</div>
+                                      </div>
+                                      <div className="flex items-center gap-1">
+                                        <button 
+                                          onClick={() => {
+                                            onGoToMap(map);
+                                            setIsOpen(false);
+                                          }}
+                                          className="p-1 px-2 bg-blue-500/10 text-blue-400 text-[9px] font-bold uppercase rounded-lg border border-blue-500/20 hover:bg-blue-500 hover:text-white transition-all"
+                                        >
+                                          Ir
+                                        </button>
+                                        <button 
+                                          onClick={() => setAppState(prev => ({
+                                            ...prev,
+                                            importedMaps: prev.importedMaps.map(m => m.id === map.id ? { ...m, visible: !m.visible } : m)
+                                          }))}
+                                          className={cn("p-1.5 rounded-lg transition-colors", map.visible ? "text-blue-500" : "text-zinc-600")}
+                                        >
+                                          {map.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                                        </button>
+                                        <button 
+                                          onClick={() => setAppState(prev => ({
+                                            ...prev,
+                                            importedMaps: prev.importedMaps.filter(m => m.id !== map.id)
+                                          }))}
+                                          className="p-1.5 text-zinc-600 hover:text-red-500 transition-colors"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-[9px] text-zinc-500 italic px-1">Nenhum mapa importado ainda.</p>
+                              )}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </section>
+
+                    <section className="border-t border-zinc-800/60 pt-4 space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsKmlExpanded(prev => !prev)}
+                        className="w-full flex items-center justify-between p-4 bg-zinc-900 border border-zinc-800 rounded-xl hover:border-zinc-700 hover:bg-zinc-900/80 transition-all text-left cursor-pointer"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400">
+                            <Layers className="w-5 h-5" />
+                          </span>
+                          <div>
+                            <div className="text-[10px] font-bold text-zinc-100 uppercase tracking-wider">Camadas Vetoriais</div>
+                            <div className="text-[9px] text-emerald-400 mt-0.5">
+                              {appState.importedKmls.length > 0 ? (
+                                <span className="font-semibold">{appState.importedKmls.length} camada(s) ativa(s)</span>
+                              ) : (
+                                "Importar KML / Linhas"
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <div>
+                          {isKmlExpanded ? (
+                            <ChevronDown className="w-4 h-4 text-zinc-500" />
+                          ) : (
+                            <ChevronRight className="w-4 h-4 text-zinc-500" />
+                          )}
+                        </div>
+                      </button>
+
+                      <AnimatePresence initial={false}>
+                        {isKmlExpanded && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.15 }}
+                            className="overflow-hidden"
+                          >
+                            <div className="pl-3 border-l border-zinc-800/80 ml-5 mt-1.5 space-y-3">
+                              <label className="w-full flex items-center justify-center gap-2.5 p-3.5 bg-zinc-900/40 border border-zinc-800/80 border-dashed rounded-xl font-bold uppercase tracking-widest text-[9px] hover:border-zinc-650 hover:bg-zinc-900/60 transition-all text-emerald-500 cursor-pointer">
+                                <Download className="w-4 h-4 flex-shrink-0 text-emerald-500" />
+                                Escolher arquivo KML
+                                <input type="file" accept=".kml" className="hidden" onChange={handleKmlImport} />
+                              </label>
+
+                              {appState.importedKmls.length > 0 ? (
+                                <div className="space-y-2">
+                                  {appState.importedKmls.map((kml) => (
+                                    <div key={kml.id} className="bg-zinc-900/30 border border-zinc-800/60 rounded-xl p-2.5 flex items-center justify-between gap-2.5">
+                                      <div className="flex-1 min-w-0">
+                                        <div className="text-[10px] font-bold text-white truncate">{kml.name}</div>
+                                        <div className="text-[8px] text-emerald-500/80 truncate">Vetor / Camada Digital</div>
+                                      </div>
+                                      <div className="flex items-center gap-1">
+                                        <button 
+                                          onClick={() => {
+                                            setAppState(prev => ({
+                                              ...prev,
+                                              importedKmls: prev.importedKmls.map(k => k.id === kml.id ? { ...k, visible: !k.visible } : k)
+                                            }));
+                                          }}
+                                          className={cn("p-1.5 rounded-lg transition-colors", kml.visible ? "text-emerald-500" : "text-zinc-600")}
+                                          title={kml.visible ? "Ocultar" : "Mostrar"}
+                                        >
+                                          {kml.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                                        </button>
+                                        <button 
+                                          onClick={() => {
+                                            const kmlText = `Camada KML: ${kml.name}\nElementos: ${kml.data?.features?.length || 0}`;
+                                            navigator.clipboard.writeText(kmlText);
+                                            alert('Informações da camada KML copiadas para área de transferência!');
+                                          }}
+                                          className="p-1.5 text-zinc-500 hover:text-white transition-colors"
+                                          title="Compartilhar"
+                                        >
+                                          <Share2 className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button 
+                                          onClick={() => {
+                                            setAppState(prev => ({
+                                              ...prev,
+                                              importedKmls: prev.importedKmls.filter(k => k.id !== kml.id)
+                                            }));
+                                          }}
+                                          className="p-1.5 text-zinc-650 hover:text-red-500 transition-colors"
+                                          title="Excluir"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-[9px] text-zinc-500 italic px-1">Nenhuma camada importada ainda.</p>
+                              )}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </section>
                   </div>
                 )}
@@ -878,121 +1094,6 @@ export default function Sidebar({ appState, setAppState, onToggleRecording, onAd
                               {appState.measurementMode === 'area' ? 'ha' : (appState.distanceUnit === 'km' ? 'km' : 'm')}
                             </span>
                           </p>
-                        </div>
-                      )}
-                    </section>
-                    
-                    <section>
-                      <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-3 px-1">Camadas de Mapa</h3>
-                      <div className="flex flex-col gap-2">
-                        <label className="w-full flex items-center justify-center gap-3 p-4 bg-zinc-900 border border-zinc-800 rounded-xl font-bold uppercase tracking-widest text-xs hover:border-zinc-600 transition-all text-blue-500 cursor-pointer">
-                          <Download className="w-5 h-5 flex-shrink-0" />
-                          Importar Mapa (GeoPDF)
-                          <input type="file" accept=".pdf" className="hidden" onChange={handleFileUpload} />
-                        </label>
-
-                        <label className="w-full flex items-center justify-center gap-3 p-4 bg-zinc-900 border border-zinc-800 rounded-xl font-bold uppercase tracking-widest text-xs hover:border-zinc-600 transition-all text-emerald-500 cursor-pointer">
-                          <Download className="w-5 h-5 flex-shrink-0 text-emerald-500" />
-                          Importar Camada (KML)
-                          <input type="file" accept=".kml" className="hidden" onChange={handleKmlImport} />
-                        </label>
-                      </div>
-
-                      {appState.importedKmls.length > 0 && (
-                        <div className="mt-6 space-y-3">
-                          <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-3 px-1">Camadas (.KML)</h3>
-                          <div className="space-y-2">
-                            {appState.importedKmls.map((kml) => (
-                              <div key={kml.id} className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-3 flex items-center justify-between gap-2">
-                                <div className="flex-1 min-w-0">
-                                  <div className="text-[11px] font-bold text-white truncate">{kml.name}</div>
-                                  <div className="text-[9px] text-emerald-500/80 truncate">Vetor / Camada Digital</div>
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  <button 
-                                    onClick={() => {
-                                      setAppState(prev => ({
-                                        ...prev,
-                                        importedKmls: prev.importedKmls.map(k => k.id === kml.id ? { ...k, visible: !k.visible } : k)
-                                      }));
-                                    }}
-                                    className={cn("p-1.5 rounded-lg transition-colors", kml.visible ? "text-emerald-500" : "text-zinc-600")}
-                                    title={kml.visible ? "Ocultar" : "Mostrar"}
-                                  >
-                                    {kml.visible ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                                  </button>
-                                  <button 
-                                    onClick={() => {
-                                      const kmlText = `Camada KML: ${kml.name}\nElementos: ${kml.data?.features?.length || 0}`;
-                                      navigator.clipboard.writeText(kmlText);
-                                      alert('Informações da camada KML copiadas para área de transferência!');
-                                    }}
-                                    className="p-1.5 text-zinc-500 hover:text-white transition-colors"
-                                    title="Compartilhar"
-                                  >
-                                    <Share2 className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button 
-                                    onClick={() => {
-                                      setAppState(prev => ({
-                                        ...prev,
-                                        importedKmls: prev.importedKmls.filter(k => k.id !== kml.id)
-                                      }));
-                                    }}
-                                    className="p-1.5 text-zinc-650 hover:text-red-500 transition-colors"
-                                    title="Excluir"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {appState.importedMaps.length > 0 && (
-                        <div className="mt-6 space-y-3">
-                          <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500 mb-3 px-1">Mapas Importados</h3>
-                          <div className="space-y-2">
-                            {appState.importedMaps.map((map) => (
-                              <div key={map.id} className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-3 flex items-center justify-between gap-3">
-                                <div className="flex-1 min-w-0">
-                                  <div className="text-[11px] font-bold text-white truncate">{map.name}</div>
-                                  <div className="text-[9px] text-zinc-500 truncate">Georreferenciado</div>
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  <button 
-                                    onClick={() => {
-                                      onGoToMap(map);
-                                      setIsOpen(false);
-                                    }}
-                                    className="p-1 px-2 bg-blue-500/10 text-blue-400 text-[10px] font-bold uppercase rounded-lg border border-blue-500/20 hover:bg-blue-500 hover:text-white transition-all"
-                                  >
-                                    Ir
-                                  </button>
-                                  <button 
-                                    onClick={() => setAppState(prev => ({
-                                      ...prev,
-                                      importedMaps: prev.importedMaps.map(m => m.id === map.id ? { ...m, visible: !m.visible } : m)
-                                    }))}
-                                    className={cn("p-2 rounded-lg transition-colors", map.visible ? "text-blue-500" : "text-zinc-600")}
-                                  >
-                                    {map.visible ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-                                  </button>
-                                  <button 
-                                    onClick={() => setAppState(prev => ({
-                                      ...prev,
-                                      importedMaps: prev.importedMaps.filter(m => m.id !== map.id)
-                                    }))}
-                                    className="p-2 text-zinc-600 hover:text-red-500 transition-colors"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
                         </div>
                       )}
                     </section>
