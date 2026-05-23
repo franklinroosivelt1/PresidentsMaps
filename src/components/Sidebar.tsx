@@ -509,22 +509,11 @@ export default function Sidebar({ appState, setAppState, onToggleRecording, onAd
         const extractedPois = result.targets || [];
         const hasTargets = extractedPois.length > 0;
         
-        const mapName = file.name.replace(/\.[^/.]+$/, "");
-        const newMap: ImportedMap = {
-          id: crypto.randomUUID(),
-          name: mapName,
-          url: result.image,
-          bounds: result.bounds,
-          coordinates: result.coordinates,
-          visible: true
-        };
-
         if (hasTargets) {
           const firstPoi = extractedPois[0];
           setAppState(prev => ({ 
             ...prev, 
             pois: [...prev.pois, ...extractedPois],
-            importedMaps: [...prev.importedMaps, newMap],
             lastCenter: { lat: firstPoi.lat, lng: firstPoi.lng },
             activeTab: 'markers',
             isSidebarOpen: true
@@ -548,11 +537,14 @@ export default function Sidebar({ appState, setAppState, onToggleRecording, onAd
           
           setAppState(prev => ({
             ...prev,
-            importedMaps: [...prev.importedMaps, newMap],
             lastCenter: { lat: centerLat, lng: centerLng }
           }));
           
-          alert(`Leitura do mapa "${file.name}" concluída!\nO mapa foi adicionado como sobreposição na aba Camadas.`);
+          alert(
+            `Leitura de metadados concluída com sucesso!\n\n` +
+            `📍 Centralizamos o mapa na região de interesse do seu PDF georreferenciado (Lat: ${centerLat.toFixed(5)}, Lng: ${centerLng.toFixed(5)}).\n` +
+            `Nenhuma tabela ou lista de coordenadas impressas foi encontrada no conteúdo textual do arquivo.`
+          );
         }
       } catch (err: any) {
         console.error("Falha ao ler dados de mapa:", err);

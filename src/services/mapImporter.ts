@@ -55,27 +55,10 @@ export async function processGeoPDF(file: File): Promise<GeoPDFMetadata> {
       }
     }
     
-    const viewport = page.getViewport({ scale: 1.5 });
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
-    
-    if (!context) throw new Error("Could not create canvas context");
-    
-    canvas.height = viewport.height;
-    canvas.width = viewport.width;
-    
-    await page.render({
-      canvasContext: context,
-      viewport: viewport,
-      canvas: canvas
-    }).promise;
-    
-    const image = canvas.toDataURL('image/jpeg', 0.8);
-    
     return {
       bounds: result?.bounds || [[-9.9, -69.5], [-8.8, -68.4]], 
       coordinates: result?.coordinates,
-      image,
+      image: "",
       targets
     };
   } catch (error) {
