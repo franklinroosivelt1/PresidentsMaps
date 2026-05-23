@@ -509,11 +509,22 @@ export default function Sidebar({ appState, setAppState, onToggleRecording, onAd
         const extractedPois = result.targets || [];
         const hasTargets = extractedPois.length > 0;
         
+        const mapName = file.name.replace(/\.[^/.]+$/, "");
+        const newMap: ImportedMap = {
+          id: crypto.randomUUID(),
+          name: mapName,
+          url: result.image,
+          bounds: result.bounds,
+          coordinates: result.coordinates,
+          visible: true
+        };
+
         if (hasTargets) {
           const firstPoi = extractedPois[0];
           setAppState(prev => ({ 
             ...prev, 
             pois: [...prev.pois, ...extractedPois],
+            importedMaps: [...prev.importedMaps, newMap],
             lastCenter: { lat: firstPoi.lat, lng: firstPoi.lng },
             activeTab: 'markers',
             isSidebarOpen: true
@@ -525,8 +536,8 @@ export default function Sidebar({ appState, setAppState, onToggleRecording, onAd
           const areasCount = extractedPois.filter(p => p.type === 'area').length;
           alert(
             `Mapa "${file.name}" lido com sucesso!\n\n` +
-            `🔍 Detecção de Atributos via IA e Crawler:\n` +
-            `• Identificamos ${extractedPois.length} alvos com dados de coordenadas/área impressos no PDF!\n` +
+            `🔍 Detecção de Atributos e Coordenadas do QGIS:\n` +
+            `• Identificamos ${extractedPois.length} alvos com dados de coordenadas/área no texto do PDF!\n` +
             `• Adicionados: ${pointsCount} pontos de centros e ${areasCount} polígonos/contornos de alvos.\n\n` +
             `Seus alvos já estão plotados e rotulados em amarelo no mapa!\nClique nos pontos para visualizar o balão flutuante correspondente.`
           );
@@ -537,10 +548,11 @@ export default function Sidebar({ appState, setAppState, onToggleRecording, onAd
           
           setAppState(prev => ({
             ...prev,
+            importedMaps: [...prev.importedMaps, newMap],
             lastCenter: { lat: centerLat, lng: centerLng }
           }));
           
-          alert(`Leitura do mapa "${file.name}" concluída!\n\nNota: Não foram identificadas tabelas de coordenadas nem polígonos descritos no texto deste PDF.`);
+          alert(`Leitura do mapa "${file.name}" concluída!\nO mapa foi adicionado como sobreposição na aba Camadas.`);
         }
       } catch (err: any) {
         console.error("Falha ao ler dados de mapa:", err);

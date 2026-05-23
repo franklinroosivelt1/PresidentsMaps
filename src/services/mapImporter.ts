@@ -41,8 +41,19 @@ export async function processGeoPDF(file: File): Promise<GeoPDFMetadata> {
       result = await extractCoordsFromText(page, pageWidth, pageHeight);
     }
 
-    // 3. Extract any specific targets, coordinates, and attributes from the text layer
-    let targets = await extractTableTargets(page);
+    // 3. Extract any specific targets, coordinates, and attributes from the text layer from ALL pages
+    const targets: POI[] = [];
+    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+      try {
+        const p = await pdf.getPage(pageNum);
+        const pageTargets = await extractTableTargets(p);
+        if (pageTargets && pageTargets.length > 0) {
+          targets.push(...pageTargets);
+        }
+      } catch (pageErr) {
+        console.error(`Error searching page ${pageNum} for targets:`, pageErr);
+      }
+    }
     
     const viewport = page.getViewport({ scale: 1.5 });
     const canvas = document.createElement('canvas');
@@ -60,65 +71,6 @@ export async function processGeoPDF(file: File): Promise<GeoPDFMetadata> {
     }).promise;
     
     const image = canvas.toDataURL('image/jpeg', 0.8);
-
-    // 4. Fallback to Gemini AI Visual Table Extractor if PDF text layer yielded no targets
-    if (targets.length === 0) {
-      console.log("No targets found via PDF text content. Falling back to Gemini AI Visual Extract.");
-      try {
-        const aiResponse = await fetch("/api/parse-map-image", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ image })
-        });
-        if (aiResponse.ok) {
-          const aiData = await aiResponse.json();
-          if (aiData.targets && aiData.targets.length > 0) {
-            console.log("Successfully extracted targets via Gemini:", aiData.targets);
-            
-            // Map the parsed AI targets to our internal robust POI structure
-            const mappedPois: POI[] = [];
-            let anonymousCounter = 1;
-            
-            for (const item of aiData.targets) {
-              const dmsLat = item.lat_centro_dms;
-              const dmsLng = item.long_centr_dms;
-              const areaVal = parseFloat(String(item.area_ha));
-              
-              const parsedLat = parseDMSToDecimal(dmsLat);
-              const parsedLng = parseDMSToDecimal(dmsLng);
-              
-              if (parsedLat !== null && parsedLng !== null && !isNaN(parsedLat) && !isNaN(parsedLng)) {
-                const id = item.id || `Alvo_${anonymousCounter++}`;
-                const hasArea = areaVal && areaVal > 0;
-                mappedPois.push({
-                  id: crypto.randomUUID(),
-                  name: `Alvo ${id}`,
-                  description: `Área informada: ${hasArea ? areaVal.toFixed(4) + ' ha' : 'Não informada'}\nLatitude (DMS): ${dmsLat}\nLongitude (DMS): ${dmsLng}`,
-                  lat: parsedLat,
-                  lng: parsedLng,
-                  color: '#facc15',
-                  createdAt: Date.now(),
-                  type: hasArea ? 'area' : 'point',
-                  visible: true,
-                  polygonArea: hasArea ? areaVal : undefined,
-                  pdfTargetId: id,
-                  pathPoints: hasArea ? generateCircleVertices(parsedLat, parsedLng, areaVal) : undefined
-                });
-              }
-            }
-            
-            if (mappedPois.length > 0) {
-              targets = mappedPois;
-            }
-          }
-        } else {
-          const errText = await aiResponse.text();
-          console.error("Gemini map-parsing endpoint returned error response:", errText);
-        }
-      } catch (aiErr) {
-        console.error("Failed to fetch from Gemini map-parsing fallback endpoint:", aiErr);
-      }
-    }
     
     return {
       bounds: result?.bounds || [[-9.9, -69.5], [-8.8, -68.4]], 
@@ -614,14 +566,14 @@ async function extractTableTargets(page: any): Promise<POI[]> {
       
     if (parsedItems.length === 0) return [];
     
-    // Group into rows based on Y coordinate with tolerance of 6 points
+    // Group into rows based on Y coordinate with tolerance of 8.0 points
     const rows: TextItem[][] = [];
     const sortedByY = [...parsedItems].sort((a, b) => b.y - a.y);
     
     for (const item of sortedByY) {
       let foundRow = false;
       for (const r of rows) {
-        if (Math.abs(r[0].y - item.y) < 6.0) {
+        if (Math.abs(r[0].y - item.y) < 8.0) {
           r.push(item);
           foundRow = true;
           break;
@@ -637,36 +589,6 @@ async function extractTableTargets(page: any): Promise<POI[]> {
       r.sort((a, b) => a.x - b.x);
     }
     
-    // Merge cell items horizontally if their horizontal gap is tiny
-    const mergedRows: string[][] = [];
-    for (const r of rows) {
-      const mergedCells: string[] = [];
-      if (r.length === 0) continue;
-      
-      let currentCell = r[0].text;
-      let lastXEnd = r[0].x + r[0].width;
-      
-      for (let i = 1; i < r.length; i++) {
-        const item = r[i];
-        const gap = item.x - lastXEnd;
-        
-        if (gap < 8.0) {
-          currentCell += " " + item.text;
-          currentCell = currentCell.replace(/\s+/g, ' ');
-          lastXEnd = Math.max(lastXEnd, item.x + item.width);
-        } else {
-          mergedCells.push(currentCell.trim());
-          currentCell = item.text;
-          lastXEnd = item.x + item.width;
-        }
-      }
-      mergedCells.push(currentCell.trim());
-      mergedRows.push(mergedCells);
-    }
-    
-    const isLatitude = (v: number) => v >= -40.0 && v <= 10.0;
-    const isLongitude = (v: number) => v >= -85.0 && v <= -30.0;
-    
     const rowsWithCoords: {
       lat: number;
       lng: number;
@@ -676,69 +598,137 @@ async function extractTableTargets(page: any): Promise<POI[]> {
     
     let anonymousCounter = 1;
     
-    for (const row of mergedRows) {
+    for (const r of rows) {
+      if (r.length === 0) continue;
+      
+      const rowText = r.map(item => item.text).join(' ');
+      
+      let normalized = rowText
+        .replace(/,/g, '.') // replace comma with point
+        .replace(/[ººoOª•*·\^]/g, '°')
+        .replace(/['’`´]{2}/g, '"')
+        .replace(/''/g, '"')
+        .replace(/[”"“«»]/g, '"')
+        .replace(/['’`´]/g, "'");
+
+      // 1. Scan for DMS strings
+      const dmsMatches: { val: number; matchesLat: boolean }[] = [];
+      const dmsRegex = /(\d+)\s*°?\s*(\d+)\s*'\s*(\d+(?:\.\d+)?)\s*"?\s*([NSWEOO])/gi;
+      let dmsMatch;
+      while ((dmsMatch = dmsRegex.exec(normalized)) !== null) {
+        const deg = parseFloat(dmsMatch[1]);
+        const min = parseFloat(dmsMatch[2]);
+        const sec = parseFloat(dmsMatch[3]);
+        const hemi = dmsMatch[4].toUpperCase();
+        
+        let val = deg + min / 60 + sec / 3600;
+        if (hemi === 'S' || hemi === 'W' || hemi === 'O') {
+          val = -val;
+        }
+        const matchesLat = (hemi === 'S' || hemi === 'N');
+        dmsMatches.push({ val, matchesLat });
+      }
+
       let parsedLat: number | null = null;
       let parsedLng: number | null = null;
-      const otherCells: string[] = [];
-      
-      for (const cellRaw of row) {
-        const cell = cellRaw.trim();
-        if (!cell) continue;
-        
-        if (!isLikelyCoordinateString(cell)) {
-          otherCells.push(cell);
-          continue;
-        }
-        
-        // Try parsing as DMS or float decimal
-        let val = parseDMSToDecimal(cell);
-        if (val === null) {
-          const cleanFloat = cell.replace(/,/g, '.').replace(/[^\d.-]/g, '');
-          const parsed = parseFloat(cleanFloat);
-          if (!isNaN(parsed)) {
-            val = parsed;
-          }
-        }
-        
-        if (val !== null && !isNaN(val)) {
-          if (isLatitude(val) && parsedLat === null) {
-            parsedLat = val;
-          } else if (isLongitude(val) && parsedLng === null) {
-            parsedLng = val;
-          } else {
-            otherCells.push(cell);
-          }
+
+      if (dmsMatches.length >= 2) {
+        const latObj = dmsMatches.find(m => m.matchesLat);
+        const lngObj = dmsMatches.find(m => !m.matchesLat);
+        if (latObj && lngObj) {
+          parsedLat = latObj.val;
+          parsedLng = lngObj.val;
         } else {
-          otherCells.push(cell);
+          // Classify by Brazilian coordinate magnitudes
+          const first = dmsMatches[0].val;
+          const second = dmsMatches[1].val;
+          if (Math.abs(first) <= 35 && Math.abs(second) > 30) {
+            parsedLat = first;
+            parsedLng = second;
+          } else if (Math.abs(second) <= 35 && Math.abs(first) > 30) {
+            parsedLat = second;
+            parsedLng = first;
+          }
         }
       }
-      
-      if (parsedLat !== null && parsedLng !== null) {
-        let area: number | undefined = undefined;
-        let id: string | undefined = undefined;
-        
-        for (const cell of otherCells) {
-          const clean = cell.toLowerCase().trim();
-          
-          if (clean.includes('ha') || clean.includes('hec') || clean.includes('área') || clean.includes('area')) {
-            const match = clean.match(/(\d+(?:[.,]\d+)?)/);
-            if (match) {
-              area = parseFloat(match[1].replace(',', '.'));
-            }
-          } else if (/^\d+(?:[.,]\d+)?$/.test(clean)) {
-            const numVal = parseFloat(clean.replace(',', '.'));
-            if (numVal > 0 && numVal < 10000) {
-              if (clean.includes('.') || clean.includes(',')) {
-                area = numVal;
-              } else if (!id) {
-                id = cell;
-              }
-            }
-          } else if (clean.length > 0 && clean.length < 20) {
-            id = cell;
+
+      // 2. Scan for decimals
+      if (parsedLat === null || parsedLng === null) {
+        const decimalMatches: number[] = [];
+        const decimalRegex = /(-?\d+\.\d+)/g;
+        let decMatch;
+        while ((decMatch = decimalRegex.exec(normalized)) !== null) {
+          const val = parseFloat(decMatch[1]);
+          decimalMatches.push(val);
+        }
+
+        if (decimalMatches.length >= 2) {
+          const first = decimalMatches[0];
+          const second = decimalMatches[1];
+          const firstAbs = Math.abs(first);
+          const secondAbs = Math.abs(second);
+
+          let latVal: number | null = null;
+          let lngVal: number | null = null;
+
+          if (firstAbs <= 35 && secondAbs > 30 && secondAbs <= 85) {
+            latVal = first;
+            lngVal = second;
+          } else if (secondAbs <= 35 && firstAbs > 30 && firstAbs <= 85) {
+            latVal = second;
+            lngVal = first;
+          }
+
+          if (latVal !== null && lngVal !== null) {
+            if (latVal > 0 && latVal >= 3 && latVal <= 35) latVal = -latVal;
+            if (lngVal > 0 && lngVal >= 30 && lngVal <= 85) lngVal = -lngVal;
+            parsedLat = latVal;
+            parsedLng = lngVal;
           }
         }
-        
+      }
+
+      if (parsedLat !== null && parsedLng !== null) {
+        // Extract Area
+        let area: number | undefined = undefined;
+        const areaPatterns = [
+          /(\d+(?:[.,]\d+)?)\s*(?:ha|hectares?|hec|área|area)/i,
+          /(?:área|area|hec|ha):?\s*(\d+(?:[.,]\d+)?)/i
+        ];
+        for (const pattern of areaPatterns) {
+          const areaMatch = rowText.match(pattern);
+          if (areaMatch) {
+            area = parseFloat(areaMatch[1].replace(',', '.'));
+            break;
+          }
+        }
+
+        // Extract ID Ponto
+        let id: string | undefined = undefined;
+        const idMatch = rowText.match(/(?:alvo|ponto|id|lote|talhão|ponto_id)\s*#?\s*([a-f0-9_-]+)/i);
+        if (idMatch) {
+          id = idMatch[1];
+        } else {
+          const words = r.map(item => item.text).filter(word => {
+            const w = word.toLowerCase().trim();
+            if (w.includes('°') || w.includes('\'') || w.includes('"') || w.includes('lat') || w.includes('lon') || w.includes('alt') || w.includes('dec')) {
+              return false;
+            }
+            if (/^(?:ha|área|area|coordenadas|leitura|tabela|ponto|alvo)$/i.test(w)) {
+              return false;
+            }
+            const num = parseFloat(w.replace(',', '.'));
+            if (!isNaN(num) && (Math.abs(num) > 2.0 && Math.abs(num) < 180.0)) {
+              return false;
+            }
+            return w.length > 0;
+          });
+
+          if (words.length > 0) {
+            id = words[0];
+          }
+        }
+
         rowsWithCoords.push({
           lat: parsedLat,
           lng: parsedLng,

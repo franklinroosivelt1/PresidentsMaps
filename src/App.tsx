@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 const MapView = React.lazy(() => import('./components/MapView'));
 import Sidebar from './components/Sidebar';
 import CoordinatePanel from './components/CoordinatePanel';
@@ -6,7 +6,7 @@ import POIDialog from './components/POIDialog';
 import { AppState, POI, RoutePoint, SavedRoute } from './types';
 import * as turf from '@turf/turf';
 import { cn } from './lib/utils';
-import { Activity, Navigation, Save, Trash2, Check } from 'lucide-react';
+import { Activity, Navigation, Save, Trash2, Check, HelpCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ManualPointOverlay from './components/ManualPointOverlay';
 
@@ -56,6 +56,7 @@ export default function App() {
   const [pendingPOI, setPendingPOI] = useState<{ lat: number; lng: number } | null>(null);
   const [editingPOI, setEditingPOI] = useState<POI | null>(null);
   const [measurementName, setMeasurementName] = useState('');
+  const [showGpsHelper, setShowGpsHelper] = useState(false);
 
   // Reset measurement name on mode change
   useEffect(() => {
@@ -75,6 +76,69 @@ export default function App() {
 
   // Screen Wake Lock API integration to retain CPU and GPS in background or locked state
   const [wakeLock, setWakeLock] = useState<any | null>(null);
+
+  // Background silent audio to trick operating systems (Android/iOS) into maintaining the tab thread active
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
+
+  const startSilentAudio = useCallback(() => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      
+      const ctx = new AudioCtx();
+      audioContextRef.current = ctx;
+
+      // Create a 1-second buffer
+      const buffer = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      
+      // Generate a practically silent 1Hz wave at extremely low amplitude (0.00001)
+      // This is inaudible but forces the browser and OS to preserve the process
+      for (let i = 0; i < buffer.length; i++) {
+        data[i] = Math.sin((2 * Math.PI * 1 * i) / ctx.sampleRate) * 0.00001;
+      }
+
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.loop = true;
+      
+      source.connect(ctx.destination);
+      source.start();
+      audioSourceRef.current = source;
+      console.log('Background silent audio started to maintain GPS tracking.');
+    } catch (err) {
+      console.error('Failed to start background silent audio:', err);
+    }
+  }, []);
+
+  const stopSilentAudio = useCallback(() => {
+    if (audioSourceRef.current) {
+      try {
+        audioSourceRef.current.stop();
+      } catch (e) {}
+      audioSourceRef.current = null;
+    }
+    if (audioContextRef.current) {
+      try {
+        audioContextRef.current.close();
+      } catch (e) {}
+      audioContextRef.current = null;
+    }
+    console.log('Background silent audio stopped.');
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      // Clean up silent audio on unmount
+      if (audioSourceRef.current) {
+        try { audioSourceRef.current.stop(); } catch(e){}
+      }
+      if (audioContextRef.current) {
+        try { audioContextRef.current.close(); } catch(e){}
+      }
+    };
+  }, []);
 
   const requestWakeLock = useCallback(async () => {
     if (!('wakeLock' in navigator)) return;
@@ -156,6 +220,7 @@ export default function App() {
 
   const toggleRecording = useCallback(() => {
     if (appState.isRecording) {
+      stopSilentAudio();
       // Save route
       if (appState.currentRoute.length > 1) {
         const line = turf.lineString(appState.currentRoute.map(p => [p.lng, p.lat]));
@@ -179,9 +244,10 @@ export default function App() {
         setAppState(prev => ({ ...prev, isRecording: false, currentRoute: [] }));
       }
     } else {
+      startSilentAudio();
       setAppState(prev => ({ ...prev, isRecording: true, currentRoute: [] }));
     }
-  }, [appState.isRecording, appState.currentRoute]);
+  }, [appState.isRecording, appState.currentRoute, startSilentAudio, stopSilentAudio]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -327,6 +393,65 @@ export default function App() {
         <div>PresidentMaps - Localização Profissional</div>
       </div>
       
+      {showGpsHelper && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-zinc-900 border border-zinc-800 text-white rounded-3xl p-6 max-w-md w-full shadow-2xl flex flex-col gap-4 font-sans"
+          >
+            <div className="flex items-center gap-3 border-b border-zinc-800 pb-3">
+              <span className="p-2 rounded-xl bg-orange-550/10 text-orange-400">
+                <HelpCircle className="w-6 h-6" />
+              </span>
+              <div>
+                <h3 className="text-base font-bold text-zinc-100">Precisão do GPS & Gravação</h3>
+                <p className="text-[10px] text-zinc-400">Evite traçados em linha reta ao bloquear o celular</p>
+              </div>
+            </div>
+
+            <div className="text-xs text-zinc-300 flex flex-col gap-3.5 leading-relaxed">
+              <p>
+                Os sistemas operacionais <strong>Android e iOS</strong> suspendem agressivamente os navegadores (Chrome, Safari, etc.) e cortam o sinal de GPS quando o celular é bloqueado manualmente pelo botão liga/desliga para economizar bateria. Isso faz com que a gravação pare e conecte com uma linha reta ao ser desbloqueado.
+              </p>
+
+              <div className="space-y-3 pt-1">
+                <div className="flex gap-2.5">
+                  <span className="text-emerald-400 font-bold shrink-0">1.</span>
+                  <div>
+                    <strong className="text-zinc-100 block mb-0.5">Mantenha a Tela Ativa (Recomendado)</strong>
+                    O app ativa o <strong>Screen Wake Lock</strong> automaticamente para impedir que a tela apague sozinha. Basta deixar o aparelho com o app aberto. Dica: você pode reduzir o brilho da tela ao mínimo para economizar bateria!
+                  </div>
+                </div>
+
+                <div className="flex gap-2.5">
+                  <span className="text-emerald-400 font-bold shrink-0">2.</span>
+                  <div>
+                    <strong className="text-zinc-100 block mb-0.5">Nova Tecnologia de Fundo Inclusa!</strong>
+                    Acabamos de integrar um sistema de <strong>Áudio Silencioso Sub-sensorial</strong>. Ao gravar, o app emite uma onda inaudível contínua para sinalizar ao sistema do celular que a aba está "ativa", minimizando as chances de suspensão do GPS em segundo plano.
+                  </div>
+                </div>
+
+                <div className="flex gap-2.5">
+                  <span className="text-emerald-400 font-bold shrink-0">3.</span>
+                  <div>
+                    <strong className="text-zinc-100 block mb-0.5">Configuração no Android (Opcional)</strong>
+                    Para máxima eficiência em segundo plano, acesse as Informações do Aplicativo do seu navegador (Chrome), vá em <em>Bateria</em> e defina como <strong>"Sem restrições"</strong> (ou Economia de Bateria Desativada) e conceda permissão de <em>Localização</em> como <strong>"Permitir o tempo todo"</strong>.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setShowGpsHelper(false)}
+              className="mt-2 w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold py-3 px-4 rounded-xl transition-colors cursor-pointer"
+            >
+              Entendi, obrigado!
+            </button>
+          </motion.div>
+        </div>
+      )}
+
       {(pendingPOI || editingPOI) && (
         <POIDialog 
           isOpen={isDialogOpen}
@@ -561,9 +686,15 @@ export default function App() {
                     </span>
                   </div>
                 </div>
-                <span className="text-[8px] text-zinc-500 font-bold uppercase tracking-wider text-center pt-1 border-t border-zinc-800 w-full">
-                  ⚠️ Tela Ativa para Gravação
-                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowGpsHelper(true)}
+                  className="text-[9px] text-zinc-400 font-bold hover:text-white uppercase tracking-wider text-center pt-2.5 border-t border-zinc-800 w-full flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                  title="Dicas para gravação perfeita"
+                >
+                  <span>⚠️ Tela Ativa para Gravação</span>
+                  <HelpCircle className="w-3 h-3 text-emerald-400" />
+                </button>
               </motion.div>
             )}
           </AnimatePresence>
